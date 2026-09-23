@@ -76,6 +76,10 @@ Confirmed through the helper on this Mac (2026-09-23, charger 70 W USB-C):
   While cut, the charger still reads as connected: `AC-W = 04` and IOKit
   `ExternalConnected = Yes`. A real unplug reads `AC-W = ff` (-1) and
   `ExternalConnected = No`, so the two can be told apart on this firmware.
+- Measured with `chargnr discharge` while charging at 82%: adapter input
+  (`PDTR`) 63–67 W and battery `B0AC` +2.4…+3.5 A; after `CHIE = 08` input
+  0.1 W and battery −1.4…−1.9 A (the Mac runs from battery); after `CHIE = 00`
+  input back to 63 W within about 6 s.
 - MagSafe LED: `ACLC` writes are accepted but macOS puts its own value back
   (read-back mismatch), so LED control is not possible here. macOS already
   shows green while its own limit holds the battery.
