@@ -27,7 +27,7 @@ struct Rig {
         controller = Controller(actuator: Actuator(smc: smc, caps: Capabilities.detect(smc)),
                                 configFile: configFile,
                                 marker: JSONFile(dir.appendingPathComponent("switched.json")),
-                                readBattery: { battery.reading })
+                                log: .quiet, readBattery: { battery.reading })
     }
 
     func set(_ percent: Int, plugged: Bool = true) {
@@ -150,7 +150,7 @@ final class FakeClock: Sendable {
         try file.save(config)
         let controller = Controller(actuator: Actuator(smc: smc, caps: Capabilities.detect(smc)),
                                     configFile: file, marker: JSONFile(dir.appendingPathComponent("m.json")),
-                                    now: { clock.now }, readBattery: { battery.reading })
+                                    now: { clock.now }, log: .quiet, readBattery: { battery.reading })
         controller.start()
         return (smc, battery, controller)
     }
@@ -232,7 +232,7 @@ final class FakeClock: Sendable {
         try file.save(config)
         let controller = Controller(actuator: Actuator(smc: smc, caps: Capabilities.detect(smc)),
                                     configFile: file, marker: JSONFile(dir.appendingPathComponent("m.json")),
-                                    now: { clock.now }, readBattery: { battery.reading })
+                                    now: { clock.now }, log: .quiet, readBattery: { battery.reading })
         return (smc, battery, controller, file)
     }
 
@@ -405,4 +405,9 @@ final class FakeClock: Sendable {
     @Test func darkWhenAdapterCut() {
         #expect(MagSafeLED.value(for: .status, pluggedIn: true, adapterOn: false, charging: false) == nil)
     }
+}
+
+extension Logger {
+    /// Keeps test runs out of the real helper's log.
+    static let quiet = Logger(.disabled)
 }

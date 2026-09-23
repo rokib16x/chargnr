@@ -53,7 +53,7 @@ public final class Controller: @unchecked Sendable {
     private let marker: JSONFile<ChargeOutput>
     private let readBattery: @Sendable () -> BatteryReading?
     private let now: @Sendable () -> Date
-    private let log = Logger(subsystem: Chargnr.helperID, category: "controller")
+    private let log: Logger
 
     public private(set) var config: ChargeConfig
     private var output = ChargeOutput.normal
@@ -68,8 +68,10 @@ public final class Controller: @unchecked Sendable {
                 configFile: JSONFile<ChargeConfig> = JSONFile(HelperPaths.config),
                 marker: JSONFile<ChargeOutput> = JSONFile(HelperPaths.dirtyMarker),
                 now: @escaping @Sendable () -> Date = Date.init,
+                log: Logger = Logger(subsystem: Chargnr.helperID, category: "controller"),
                 readBattery: @escaping @Sendable () -> BatteryReading?) {
         self.actuator = actuator
+        self.log = log
         self.configFile = configFile
         self.marker = marker
         self.now = now
