@@ -43,6 +43,7 @@ targets:
       - sdk: ServiceManagement.framework
       - sdk: UserNotifications.framework
       - sdk: Charts.framework
+      - sdk: AppIntents.framework
     settings:
       base:
         PRODUCT_NAME: chargnr
