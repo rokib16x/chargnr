@@ -85,7 +85,7 @@ public final class Controller: @unchecked Sendable {
     /// kill -9, power loss), put them back before doing anything else.
     public func start() {
         if let left = marker.load() {
-            log.notice("previous run left switches at \(String(describing: left)); restoring")
+            log.notice("previous run left switches at \(String(describing: left), privacy: .public); restoring")
         }
         // Restore unconditionally: another tool may have changed keys too, and
         // the policy re-applies whatever is needed on the first tick.
@@ -132,7 +132,7 @@ public final class Controller: @unchecked Sendable {
         ended.topUpUntil = nil
         try? configFile.save(ended)
         config = ended
-        log.notice("top up ended: \(reason)")
+        log.notice("top up ended: \(reason, privacy: .public)")
         onTopUpEnded?(ended)
     }
 
@@ -142,7 +142,7 @@ public final class Controller: @unchecked Sendable {
         ended.dischargeTo = nil
         try? configFile.save(ended)
         config = ended
-        log.notice("discharge finished at \(reading.percent)%")
+        log.notice("discharge finished at \(reading.percent, privacy: .public)%")
     }
 
     /// True while a force discharge is running, so the helper can keep the Mac
@@ -165,11 +165,11 @@ public final class Controller: @unchecked Sendable {
             let cooled = temperature <= limit - ChargeConfig.heatHysteresis
             if cooled && now().timeIntervalSince(since) >= ChargeConfig.heatCooldown {
                 hotSince = nil
-                log.notice("battery cooled to \(temperature, format: .fixed(precision: 1)) °C; heat protection off")
+                log.notice("battery cooled to \(temperature, format: .fixed(precision: 1), privacy: .public) °C; heat protection off")
             }
         } else if temperature >= limit {
             hotSince = now()
-            log.notice("battery at \(temperature, format: .fixed(precision: 1)) °C; pausing charging")
+            log.notice("battery at \(temperature, format: .fixed(precision: 1), privacy: .public) °C; pausing charging")
         }
     }
 
@@ -177,7 +177,7 @@ public final class Controller: @unchecked Sendable {
         let new = new.normalized
         try configFile.save(new)
         config = new
-        log.notice("config: limit \(new.limit)% gap \(new.gap) heat \(new.heatLimit.map { "\($0) °C" } ?? "off"), method \(self.method.rawValue)")
+        log.notice("config: limit \(new.limit, privacy: .public)% gap \(new.gap, privacy: .public) heat \(new.heatLimit.map { "\($0) °C" } ?? "off", privacy: .public), method \(self.method.rawValue, privacy: .public)")
         tick()
     }
 
@@ -207,7 +207,7 @@ public final class Controller: @unchecked Sendable {
             lastError = nil
         } catch {
             lastError = "restore failed: \(error)"
-            log.error("restore failed: \(String(describing: error))")
+            log.error("restore failed: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -245,11 +245,11 @@ public final class Controller: @unchecked Sendable {
             lastError = ledRefused
         } catch {
             lastError = "\(error)"
-            log.error("apply failed: \(String(describing: error))")
+            log.error("apply failed: \(String(describing: error), privacy: .public)")
             return
         }
         if switches.chargingAllowed != output.chargingAllowed || switches.adapterOn != output.adapterOn {
-            log.notice("charging \(next.chargingAllowed ? "on" : "off"), adapter \(next.adapterOn ? "on" : "off")")
+            log.notice("charging \(next.chargingAllowed ? "on" : "off", privacy: .public), adapter \(next.adapterOn ? "on" : "off", privacy: .public)")
         }
         switches.led = applyLED(next.led)
         output = switches
@@ -270,7 +270,7 @@ public final class Controller: @unchecked Sendable {
         } catch {
             ledRefused = "MagSafe LED control refused by this Mac (\(error))"
             lastError = ledRefused
-            log.error("LED write failed; LED control off until restart")
+            log.error("LED write failed (\(String(describing: error), privacy: .public)); LED control off until restart")
             return nil
         }
     }

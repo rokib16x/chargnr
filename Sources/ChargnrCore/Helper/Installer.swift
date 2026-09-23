@@ -31,7 +31,8 @@ public enum Installer {
             "ProgramArguments": [helperPath],
             "MachServices": [HelperService.name: true],
             "RunAtLoad": true,
-            "KeepAlive": true,
+            // Restart after a crash, but not after a clean exit (uninstall).
+            "KeepAlive": ["SuccessfulExit": false],
             // Low priority work; macOS may delay it to save power.
             "ProcessType": "Background",
         ]

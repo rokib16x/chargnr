@@ -298,6 +298,8 @@ case "topup":
         print("Top up cancelled; back to the \(outcome.config.limit)% limit.")
     } else if !outcome.config.isLimited {
         print("No limit is set, so the battery already charges to 100%.")
+    } else if let percent = BatteryInfo.current()?.percent, percent >= 100 {
+        print("The battery is already full; nothing to top up.")
     } else {
         print("Charging to 100% once. The \(outcome.config.limit)% limit comes back when the battery is full, when you unplug, or after 12 hours.")
     }

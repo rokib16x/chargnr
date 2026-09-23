@@ -17,11 +17,11 @@ guard getuid() == 0 else {
 
 let smc: AppleSMC
 do { smc = try AppleSMC() } catch {
-    log.fault("cannot open the SMC: \(String(describing: error))")
+    log.fault("cannot open the SMC: \(String(describing: error), privacy: .public)")
     exit(69)
 }
 let caps = Capabilities.detect(smc)
-log.notice("chargnr-helper \(Chargnr.version): \(caps.charging.rawValue), adapter \(caps.adapterKey?.description ?? "none")")
+log.notice("chargnr-helper \(Chargnr.version, privacy: .public): \(caps.charging.rawValue, privacy: .public), adapter \(caps.adapterKey?.description ?? "none", privacy: .public)")
 
 /// Every controller call runs on this queue.
 let queue = DispatchQueue(label: "\(Chargnr.helperID).control")
@@ -32,7 +32,7 @@ let controller = Controller(actuator: Actuator(smc: smc, caps: caps),
 controller.onTopUpEnded = { config in
     guard caps.charging == .gated || caps.charging == .unsupported else { return }
     do { try NativeChargeLimit.set(config.nativeTarget()) } catch {
-        log.notice("could not restore macOS limit after top up: \(String(describing: error))")
+        log.notice("could not restore macOS limit after top up: \(String(describing: error), privacy: .public)")
     }
 }
 
@@ -109,7 +109,7 @@ let signalSources = [SIGTERM, SIGINT, SIGHUP].map { sig in
     let source = DispatchSource.makeSignalSource(signal: sig, queue: queue)
     source.setEventHandler {
         controller.restore()
-        log.notice("signal \(sig): restored normal charging, exiting")
+        log.notice("signal \(sig, privacy: .public): restored normal charging, exiting")
         exit(0)
     }
     source.resume()
@@ -162,7 +162,7 @@ final class Listener: NSObject, NSXPCListenerDelegate {
             connection.setCodeSigningRequirement(requirement)
         case .consoleUser:
             guard CallerPolicy.isRootOrConsoleUser(connection.effectiveUserIdentifier) else {
-                log.notice("refused uid \(connection.effectiveUserIdentifier): not root or the console user")
+                log.notice("refused uid \(connection.effectiveUserIdentifier, privacy: .public): not root or the console user")
                 return false
             }
         }
@@ -177,7 +177,7 @@ let delegate = Listener()
 let listener = NSXPCListener(machServiceName: HelperService.name)
 listener.delegate = delegate
 listener.resume()
-log.notice("listening as \(HelperService.name), callers: \(String(describing: delegate.policy))")
+log.notice("listening as \(HelperService.name, privacy: .public), callers: \(String(describing: delegate.policy), privacy: .public)")
 
 withExtendedLifetime((timer, powerSource, signalSources, listener)) {
     RunLoop.main.run()
