@@ -70,6 +70,22 @@ What still works on this firmware:
    while chargnr is awake to switch it, adds shallow cycles, and must restore
    the adapter on exit, crash and before sleep.
 
+Confirmed through the helper on this Mac (2026-09-23, charger 70 W USB-C):
+
+- Adapter cut: `CHIE = 08` is accepted and read back as root; `00` restores it.
+  While cut, the charger still reads as connected: `AC-W = 04` and IOKit
+  `ExternalConnected = Yes`. A real unplug reads `AC-W = ff` (-1) and
+  `ExternalConnected = No`, so the two can be told apart on this firmware.
+- MagSafe LED: `ACLC` writes are accepted but macOS puts its own value back
+  (read-back mismatch), so LED control is not possible here. macOS already
+  shows green while its own limit holds the battery.
+- macOS's own limit, when the battery is above it, runs the Mac from the
+  battery with the charger connected (`PDTR` ≈ 0 W) until it drops to the
+  limit, like the firmware limit on early macOS 27 betas.
+- The root helper can set macOS's own limit through PowerUI (it put the limit
+  back after a top up with no error), so the user-side re-sync is a fallback.
+- SMC `B0AC` (si16) and `PDTR` (flt) are little-endian on this Mac.
+
 MCL = managed charge limit, OBC = optimized battery charging, DEoC = the
 "desktop end of charge" mode.
 
