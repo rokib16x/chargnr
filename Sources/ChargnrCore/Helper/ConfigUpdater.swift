@@ -58,7 +58,7 @@ public struct ConfigUpdater: Sendable {
 
         let method = ControlMethod.choose(for: config, caps: caps)
         let native = usesNativeLimit
-        if method != .none || requireHelper, status == nil {
+        if config.needsHelper(caps) || requireHelper, status == nil {
             // Surface the real reason (not installed, refused, ...).
             do { _ = try await client.status() } catch { throw .helper(error) }
         }

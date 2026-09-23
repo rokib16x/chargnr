@@ -133,3 +133,91 @@ struct Rig {
         #expect(rig.controller.status().lastError != nil)
     }
 }
+
+/// A clock the tests can move.
+final class FakeClock: Sendable {
+    private let state = OSAllocatedUnfairLock(initialState: Date(timeIntervalSince1970: 1_000_000))
+    var now: Date { state.withLock { $0 } }
+    func advance(_ seconds: TimeInterval) { state.withLock { $0 += seconds } }
+}
+
+@Suite struct HeatProtectionTests {
+    func rig(_ profile: FakeSMC.Profile, config: ChargeConfig, clock: FakeClock) throws -> (FakeSMC, FakeBattery, Controller) {
+        let smc = FakeSMC(profile: profile)
+        let battery = FakeBattery()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let file = JSONFile<ChargeConfig>(dir.appendingPathComponent("config.json"))
+        try file.save(config)
+        let controller = Controller(actuator: Actuator(smc: smc, caps: Capabilities.detect(smc)),
+                                    configFile: file, marker: JSONFile(dir.appendingPathComponent("m.json")),
+                                    now: { clock.now }, readBattery: { battery.reading })
+        controller.start()
+        return (smc, battery, controller)
+    }
+
+    @Test func pausesChargingWhenHotAndWaitsForCooldown() throws {
+        let clock = FakeClock()
+        let (smc, battery, controller) = try rig(.tahoe, config: ChargeConfig(heatLimit: 35), clock: clock)
+        battery.reading = BatteryReading(percent: 50, pluggedIn: true, temperatureC: 34.9)
+        controller.tick()
+        #expect(try smc.read("CHTE") == [0, 0, 0, 0])
+
+        battery.reading.temperatureC = 35.0
+        controller.tick()
+        #expect(try smc.read("CHTE") == [1, 0, 0, 0])
+        #expect(controller.status().heatHold == true)
+
+        battery.reading.temperatureC = 32.0 // cooled, but cooldown not over
+        clock.advance(60)
+        controller.tick()
+        #expect(try smc.read("CHTE") == [1, 0, 0, 0])
+
+        clock.advance(ChargeConfig.heatCooldown)
+        controller.tick()
+        #expect(try smc.read("CHTE") == [0, 0, 0, 0])
+        #expect(controller.status().heatHold == false)
+    }
+
+    @Test func staysOnUntilCooledEnough() throws {
+        let clock = FakeClock()
+        let (smc, battery, controller) = try rig(.tahoe, config: ChargeConfig(heatLimit: 35), clock: clock)
+        battery.reading = BatteryReading(percent: 50, pluggedIn: true, temperatureC: 36)
+        controller.tick()
+        battery.reading.temperatureC = 33.5 // above 35 - 2
+        clock.advance(ChargeConfig.heatCooldown * 2)
+        controller.tick()
+        #expect(try smc.read("CHTE") == [1, 0, 0, 0])
+    }
+
+    @Test func cutsAdapterOnGatedFirmware() throws {
+        let clock = FakeClock()
+        let (smc, battery, controller) = try rig(.gated, config: ChargeConfig(limit: 90, heatLimit: 35), clock: clock)
+        battery.reading = BatteryReading(percent: 50, pluggedIn: true, temperatureC: 38)
+        controller.tick()
+        #expect(try smc.read("CHIE") == [0x08])
+        controller.willSleep()
+        #expect(try smc.read("CHIE") == [0x00], "never sleep with the adapter cut")
+    }
+
+    @Test func combinesWithLimit() throws {
+        let clock = FakeClock()
+        let (smc, battery, controller) = try rig(.tahoe, config: ChargeConfig(limit: 80, heatLimit: 40), clock: clock)
+        battery.reading = BatteryReading(percent: 85, pluggedIn: true, temperatureC: 30)
+        controller.tick()
+        #expect(try smc.read("CHTE") == [1, 0, 0, 0], "limit alone holds")
+    }
+
+    @Test func missingTemperatureDoesNothing() throws {
+        let clock = FakeClock()
+        let (smc, battery, controller) = try rig(.tahoe, config: ChargeConfig(heatLimit: 30), clock: clock)
+        battery.reading = BatteryReading(percent: 50, pluggedIn: true, temperatureC: nil)
+        controller.tick()
+        #expect(try smc.read("CHTE") == [0, 0, 0, 0])
+    }
+
+    @Test func needsHelper() {
+        let gated = Capabilities.detect(FakeSMC(profile: .gated))
+        #expect(!ChargeConfig(limit: 85).needsHelper(gated))
+        #expect(ChargeConfig(limit: 85, heatLimit: 35).needsHelper(gated))
+    }
+}

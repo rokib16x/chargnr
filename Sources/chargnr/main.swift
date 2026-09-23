@@ -11,6 +11,7 @@ let usage = """
       limit off          charge normally
       sailing POINTS     at the limit, pause charging until the battery drops
                          POINTS below it (1–20, default 5); sailing off = 1
+      heat CELSIUS       pause charging while the battery is this hot (30–45); heat off
       install            install the background helper (needs sudo)
       uninstall          remove the helper and restore normal charging (needs sudo)
       keys [--all|KEY…]  raw values of the SMC keys chargnr uses (--all: every key)
@@ -169,6 +170,10 @@ case "status":
             let limit = helper.config.isLimited ? "limit \(helper.config.limit)% (resume at \(helper.config.resumeBelow)%)" : "no limit"
             print("Helper".padding(toLength: 18, withPad: " ", startingAt: 0)
                   + "running \(helper.version), \(limit), method \(helper.method.rawValue)")
+            if let t = helper.temperatureC, let heat = helper.config.heatLimit {
+                print("Heat protection".padding(toLength: 18, withPad: " ", startingAt: 0)
+                      + String(format: "%@ (battery %.1f °C, limit %d °C)", helper.heatHold == true ? "pausing charging" : "on", t, heat))
+            }
             if let error = helper.lastError { print("Helper error".padding(toLength: 18, withPad: " ", startingAt: 0) + error) }
         } else if real {
             print("Helper".padding(toLength: 18, withPad: " ", startingAt: 0)
@@ -242,6 +247,24 @@ case "sailing":
         print("Sailing off: charging resumes as soon as the battery drops below \(c.limit)%.")
     } else {
         print("Sailing \(c.gap) points: at \(c.limit)% charging pauses until the battery drops below \(c.resumeBelow)%.")
+    }
+case "heat":
+    guard let value = args.popFirst() else { fail("usage: chargnr heat CELSIUS | off") }
+    let options = Options(args)
+    let limit: Int?
+    if value == "off" { limit = nil } else {
+        guard let number = Int(value.trimmingCharacters(in: CharacterSet(charactersIn: "°Cc"))),
+              ChargeConfig.heatLimitRange.contains(number) else {
+            fail("heat must be \(ChargeConfig.heatLimitRange.lowerBound)–\(ChargeConfig.heatLimitRange.upperBound) °C or off")
+        }
+        limit = number
+    }
+    let outcome = await updateConfig(options, requireHelper: limit != nil) { $0.heatLimit = limit }
+    if let limit = outcome.config.heatLimit {
+        let how = Capabilities.detect(options.transport()).canInhibit ? "pauses charging" : "runs the Mac from battery"
+        print("Heat protection on: at \(limit) °C chargnr \(how) until the battery cools to \(limit - Int(ChargeConfig.heatHysteresis)) °C (at least \(Int(ChargeConfig.heatCooldown / 60)) min).")
+    } else {
+        print("Heat protection off.")
     }
 case "install":
     let helper = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()

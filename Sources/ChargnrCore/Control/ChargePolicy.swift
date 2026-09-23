@@ -43,8 +43,46 @@ public struct ChargeOutput: Codable, Equatable, Sendable {
     }
 }
 
-/// The charge-limit decision, as a pure function so it can be tested without hardware.
+/// Everything a decision depends on.
+public struct PolicyInput: Sendable {
+    public var config: ChargeConfig
+    public var method: ControlMethod
+    public var percent: Int
+    public var pluggedIn: Bool
+    /// Heat protection is holding (the controller handles hysteresis and cooldown).
+    public var hot: Bool = false
+    public var canInhibit: Bool
+    public var canCutAdapter: Bool
+    public var previous: ChargeOutput
+
+    public init(config: ChargeConfig, method: ControlMethod, percent: Int, pluggedIn: Bool,
+                hot: Bool = false, canInhibit: Bool, canCutAdapter: Bool, previous: ChargeOutput) {
+        self.config = config
+        self.method = method
+        self.percent = percent
+        self.pluggedIn = pluggedIn
+        self.hot = hot
+        self.canInhibit = canInhibit
+        self.canCutAdapter = canCutAdapter
+        self.previous = previous
+    }
+}
+
+/// The charging decision, as a pure function so it can be tested without hardware.
 public enum ChargePolicy {
+    /// Combines the limit with heat protection. Heat wins: it only ever
+    /// switches things off, never back on.
+    public static func decide(_ input: PolicyInput) -> ChargeOutput {
+        var output = decide(config: input.config, method: input.method, percent: input.percent,
+                            pluggedIn: input.pluggedIn, previous: input.previous)
+        if input.hot && (input.pluggedIn || !input.previous.adapterOn) {
+            // Stopping charging keeps the Mac on wall power, so prefer it.
+            if input.canInhibit { output.chargingAllowed = false }
+            else if input.canCutAdapter { output.adapterOn = false }
+        }
+        return output
+    }
+
     /// - Parameters:
     ///   - percent: current battery percentage.
     ///   - pluggedIn: whether a charger is connected.
