@@ -10,8 +10,10 @@ public final class FakeSMC: SMCTransport {
         case legacy
         /// macOS 26 Tahoe firmware: CHTE charging, CHIE adapter.
         case tahoe
-        /// macOS 27 firmware charge limit: bfF0/bfD0/bfE0.
-        case firmware
+        /// Early macOS 27 firmware (before 20457.0.125): bfF0/bfD0/bfE0 limit.
+        case firmwareLimit
+        /// Firmware 20457.1+: no charge-control keys left, only CHIE and ACLC.
+        case adapterOnly
         /// No known charging keys.
         case unsupported
     }
@@ -45,6 +47,7 @@ public final class FakeSMC: SMCTransport {
         self.init()
         set("BUIC", type: "ui8 ", [charge])
         set("AC-W", type: "si8 ", [pluggedIn ? 1 : 0])
+        set("TB0T", type: "flt ", withUnsafeBytes(of: Float(30.5).bitPattern.littleEndian, Array.init))
         switch profile {
         case .legacy:
             set("CH0B", type: "hex_", [0])
@@ -55,12 +58,15 @@ public final class FakeSMC: SMCTransport {
             set("CHTE", type: "ui32", [0, 0, 0, 0])
             set("CHIE", type: "hex_", [0])
             set("ACLC", type: "ui8 ", [0])
-        case .firmware:
+        case .firmwareLimit:
             set("CHTE", type: "ui32", [0, 0, 0, 0])
             set("CHIE", type: "hex_", [0])
             set("bfF0", type: "ui8 ", [0])
             set("bfD0", type: "ui32", [100, 0, 0, 0])
             set("bfE0", type: "ui32", [100, 0, 0, 0])
+        case .adapterOnly:
+            set("CHIE", type: "hex_", [0])
+            set("ACLC", type: "ui8 ", [3])
         case .unsupported:
             break
         }

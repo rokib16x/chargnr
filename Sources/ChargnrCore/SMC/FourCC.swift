@@ -27,5 +27,21 @@ public struct FourCC: Hashable, Sendable, CustomStringConvertible, ExpressibleBy
     }
 }
 
+extension FourCC: Codable {
+    public init(from decoder: any Decoder) throws {
+        let string = try decoder.singleValueContainer().decode(String.self)
+        guard let code = FourCC(string: string) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                                                    debugDescription: "not a four-character code: \(string)"))
+        }
+        self = code
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(description)
+    }
+}
+
 public typealias SMCKey = FourCC
 public typealias SMCDataType = FourCC
