@@ -1,0 +1,36 @@
+name: chargnr
+options:
+  bundleIdPrefix: com.rokib16x
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+packages:
+  chargnr:
+    path: .
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ARCHS: arm64
+targets:
+  chargnr:
+    type: application
+    platform: macOS
+    sources:
+      - path: App/Sources
+      - path: App/Resources
+        buildPhase: none
+    dependencies:
+      - package: chargnr
+        product: ChargnrCore
+    settings:
+      base:
+        PRODUCT_NAME: chargnr
+        PRODUCT_BUNDLE_IDENTIFIER: com.rokib16x.chargnr
+        INFOPLIST_FILE: App/Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: ""
+        ENABLE_HARDENED_RUNTIME: YES

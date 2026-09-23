@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test package
+        run: |
+          swift build
+          swift test
+      - name: Build app
+        run: |
+          brew install xcodegen
+          make app
