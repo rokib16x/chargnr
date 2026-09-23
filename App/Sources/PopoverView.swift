@@ -360,7 +360,7 @@ struct HistoryChart: View {
         .chartXAxis {
             AxisMarks(values: .stride(by: .hour, count: 6)) { _ in
                 AxisGridLine()
-                AxisValueLabel(format: .dateTime.hour(), centered: false).font(.caption2)
+                AxisValueLabel(format: .dateTime.hour()).font(.caption2)
             }
         }
         .frame(height: 70)

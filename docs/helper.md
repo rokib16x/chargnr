@@ -47,6 +47,21 @@ control carries on.
 Top up and discharge cancel each other. Settings that need the helper fail up
 front when it is not running.
 
+**Calibration** (`calibrate`, `schedule`): discharge to 15% (a discharge
+with the keep-awake assertion), charge to 100% (macOS's limit lifted by the
+helper), hold for 60 minutes, then back to the limit. Abandoned after 24 hours.
+A schedule starts a run every N days from a set hour once plugged in.
+
+**History**: the helper appends a CSV sample to
+`/Library/Application Support/chargnr/history.csv` on every change of level,
+charger, charging or held state, and every 10 minutes otherwise, and trims it
+to 30 days. `history(since:)` over XPC serves the CLI and the app's chart.
+
+Confirmed on firmware 20457.1.29 with helper 0.2.0: calibration's discharge
+step cuts the adapter (input 0.1 W) with macOS's limit left at 85%, `stop`
+restores it (19.9 W), and the helper holds `PreventUserIdleSystemSleep`
+("chargnr force discharge") only while discharging.
+
 ## Safety rules
 
 - **Only `Actuator` writes charging keys.** It skips writes already in place,
