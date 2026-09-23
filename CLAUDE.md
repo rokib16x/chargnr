@@ -28,11 +28,12 @@ Apple Silicon only, macOS 14+, with support for macOS 27's firmware charge limit
 
 ```
 Package.swift            SwiftPM: core library, CLI, helper
-Sources/ChargnrCore      SMC types, transports (FakeSMC now, AppleSMC in phase 1), logic
+Sources/ChargnrCore      SMC types, transports (AppleSMC, FakeSMC), logic
 Sources/chargnr          CLI
 Sources/chargnr-helper   root daemon (phase 2: SMAppService + XPC)
 App/                     menu bar app (Xcode target from project.yml)
 Tests/ChargnrCoreTests   swift-testing tests
+docs/hardware.md         SMC keys and firmware findings; update it when hardware facts change
 ```
 
 ## Build and run
@@ -52,7 +53,7 @@ open build/Build/Products/Debug/chargnr.app
 ## Roadmap
 
 0. Repo, build, CI, fake hardware ← done
-1. Real AppleSMC transport, key-set detection (legacy / Tahoe / macOS 27 firmware), `chargnr status`
+1. Real AppleSMC transport, key-set detection (legacy / Tahoe / macOS 27 firmware), `chargnr status` ← done (see docs/hardware.md: firmware 20457.1 has no charge keys)
 2. Root helper: SMAppService, XPC with signing check, verified writes, watchdog, sleep hooks, overcharge guard
 3. Charging logic: limit, sailing, heat, top up, discharge, adapter, MagSafe LED
 4. Menu bar UI, notifications, login item
