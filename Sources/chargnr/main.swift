@@ -20,6 +20,8 @@ let usage = """
                          discharge to N% (15), charge to 100%, hold MIN (60), resume limit
       calibrate cancel | skip
       schedule DAYS [--hour H]  calibrate every DAYS (7–90) from hour H (3); schedule off
+      history [--hours N] [--json]
+                         battery history recorded by the helper (default 24 h, up to 30 days)
       install            install the background helper (needs sudo)
       uninstall          remove the helper and restore normal charging (needs sudo)
       keys [--all|KEY…]  raw values of the SMC keys chargnr uses (--all: every key)
@@ -56,6 +58,7 @@ struct Options {
     var to: Int?
     var hold: Int?
     var hour: Int?
+    var hours: Int?
 
     init(_ args: ArraySlice<String>) {
         var args = args
@@ -68,9 +71,14 @@ struct Options {
                     fail("--gap needs a number from \(ChargeConfig.gapRange.lowerBound) to \(ChargeConfig.gapRange.upperBound)")
                 }
                 gap = value
-            case "--to", "--hold", "--hour":
+            case "--to", "--hold", "--hour", "--hours":
                 guard let value = args.popFirst().flatMap(Int.init) else { fail("\(arg) needs a number") }
-                if arg == "--to" { to = value } else if arg == "--hold" { hold = value } else { hour = value }
+                switch arg {
+                case "--to": to = value
+                case "--hold": hold = value
+                case "--hour": hour = value
+                default: hours = value
+                }
             case "--for":
                 guard let value = args.popFirst().flatMap(Int.init), (1...3600).contains(value) else {
                     fail("--for needs a number of seconds from 1 to 3600")
@@ -214,6 +222,10 @@ case "status":
             if let t = helper.temperatureC, let heat = helper.config.heatLimit {
                 print("Heat protection".padding(toLength: 18, withPad: " ", startingAt: 0)
                       + String(format: "%@ (battery %.1f °C, limit %d °C)", helper.heatHold == true ? "pausing charging" : "on", t, heat))
+            }
+            if helper.version != Chargnr.version {
+                print("Helper update".padding(toLength: 18, withPad: " ", startingAt: 0)
+                      + "helper is \(helper.version), chargnr is \(Chargnr.version): run sudo chargnr install")
             }
             if let error = helper.lastError { print("Helper error".padding(toLength: 18, withPad: " ", startingAt: 0) + error) }
         } else if real {
@@ -417,6 +429,48 @@ case "schedule":
         print("Calibration every \(schedule.everyDays) days. Next: \(next.formatted(date: .abbreviated, time: .shortened)), once the charger is connected.")
     } else {
         print("Calibration schedule off.")
+    }
+case "history":
+    let options = Options(args)
+    let hours = min(max(options.hours ?? 24, 1), 24 * 30)
+    let since = Date().addingTimeInterval(-Double(hours) * 3600)
+    let samples: [HistorySample]
+    do { samples = try await HelperClient().history(since: since) } catch {
+        if case .refused = error {
+            fail("the installed helper is older than this chargnr and has no history; update it with: sudo chargnr install", code: 69)
+        }
+        fail("\(error)", code: 69)
+    }
+    if options.json {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        print(String(decoding: try encoder.encode(samples), as: UTF8.self))
+        exit(0)
+    }
+    guard let summary = HistorySummary(samples) else {
+        print("No history yet for the last \(hours) h. The helper records as the battery changes.")
+        exit(0)
+    }
+    func pct(_ share: Double) -> String { "\(Int((share * 100).rounded()))%" }
+    print("Last \(hours) h: battery \(summary.minPercent)–\(summary.maxPercent)%, plugged in \(pct(summary.pluggedShare)) of the time, "
+          + "at 95%+ \(pct(summary.nearFullShare)), held by chargnr \(pct(summary.heldShare))"
+          + (summary.maxTemperatureC.map { String(format: ", hottest %.1f °C", $0) } ?? "") + ".")
+    print("")
+    // One row per hour: the reading closest to the start of that hour.
+    let formatter = DateFormatter()
+    formatter.dateFormat = hours > 48 ? "MMM d HH:mm" : "HH:mm"
+    var bucket = Calendar.current.dateInterval(of: .hour, for: since)?.start ?? since
+    var index = 0
+    while bucket <= Date() {
+        while index + 1 < samples.count, samples[index + 1].time <= bucket { index += 1 }
+        let s = samples[index]
+        if s.time <= bucket.addingTimeInterval(3600) {
+            let bar = String(repeating: "█", count: s.percent / 5)
+            let state = s.held ? "held" : s.charging ? "charging" : s.pluggedIn ? "plugged" : "battery"
+            print("\(formatter.string(from: bucket))  \(String(format: "%3d", s.percent))%  \(bar.padding(toLength: 20, withPad: " ", startingAt: 0))  \(state)")
+        }
+        bucket = bucket.addingTimeInterval(hours > 48 ? 6 * 3600 : 3600)
     }
 case "install":
     // Next to the CLI: .build/release, Homebrew, or chargnr.app/Contents/MacOS.

@@ -8,12 +8,16 @@ public struct BatteryReading: Equatable, Sendable {
     public var temperatureC: Double?
     /// Whether the battery is taking charge (IOKit), when known.
     public var isCharging: Bool?
+    /// Battery power in milliwatts (IOKit), for history.
+    public var batteryMW: Int?
 
-    public init(percent: Int, pluggedIn: Bool, temperatureC: Double? = nil, isCharging: Bool? = nil) {
+    public init(percent: Int, pluggedIn: Bool, temperatureC: Double? = nil, isCharging: Bool? = nil,
+                batteryMW: Int? = nil) {
         self.percent = percent
         self.pluggedIn = pluggedIn
         self.temperatureC = temperatureC
         self.isCharging = isCharging
+        self.batteryMW = batteryMW
     }
 
     /// Reads the SMC, which answers even when IOKit's battery service lags.
@@ -21,8 +25,9 @@ public struct BatteryReading: Equatable, Sendable {
         let state = ChargeState.read(smc, Capabilities(charging: .unsupported, canInhibit: false, adapterKey: nil,
                                                        magSafeLED: false, temperature: smc.exists(SMCKeys.batteryTemperature)))
         guard let percent = state.percent, let plugged = state.pluggedIn else { return nil }
+        let info = BatteryInfo.current()
         return BatteryReading(percent: percent, pluggedIn: plugged, temperatureC: state.temperatureC,
-                              isCharging: BatteryInfo.current()?.isCharging)
+                              isCharging: info?.isCharging, batteryMW: info?.batteryPowerMW)
     }
 }
 
@@ -55,6 +60,7 @@ public final class Controller: @unchecked Sendable {
     private let marker: JSONFile<ChargeOutput>
     private let readBattery: @Sendable () -> BatteryReading?
     private let now: @Sendable () -> Date
+    private let history: HistoryStore?
     private let log: Logger
 
     public private(set) var config: ChargeConfig
@@ -71,8 +77,10 @@ public final class Controller: @unchecked Sendable {
                 marker: JSONFile<ChargeOutput> = JSONFile(HelperPaths.dirtyMarker),
                 now: @escaping @Sendable () -> Date = Date.init,
                 log: Logger = Logger(subsystem: Chargnr.helperID, category: "controller"),
+                history: HistoryStore? = nil,
                 readBattery: @escaping @Sendable () -> BatteryReading?) {
         self.actuator = actuator
+        self.history = history
         self.log = log
         self.configFile = configFile
         self.marker = marker
@@ -122,6 +130,11 @@ public final class Controller: @unchecked Sendable {
                                             adapterOn: next.adapterOn, charging: charging)
             }
             apply(next)
+            history?.record(HistorySample(
+                time: now(), percent: reading.percent, pluggedIn: reading.pluggedIn,
+                charging: reading.isCharging ?? (next.chargingAllowed && next.adapterOn && reading.pluggedIn),
+                temperatureC: reading.temperatureC, batteryMW: reading.batteryMW,
+                held: output.chargingAllowed == false || output.adapterOn == false))
         }
         return interval
     }

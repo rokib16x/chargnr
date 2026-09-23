@@ -1,3 +1,4 @@
+import Charts
 import ChargnrCore
 import SwiftUI
 
@@ -84,7 +85,7 @@ struct PopoverView: View {
                         in: ChargeConfig.gapRange) {
                     Text("Sailing: resume below \(model.config.resumeBelow)%").font(.callout)
                 }
-                .disabled(model.helperState != .running)
+                .disabled(!model.helperRunning)
             }
         }
     }
@@ -108,7 +109,7 @@ struct PopoverView: View {
     // MARK: - Actions
 
     private var actions: some View {
-        let running = model.helperState == .running
+        let running = model.helperRunning
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 if model.phase == .toppingUp {
@@ -161,6 +162,9 @@ struct PopoverView: View {
 
     private var details: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if model.history.count > 1 {
+                HistoryChart(samples: model.history, limit: model.config.isLimited ? model.config.limit : nil)
+            }
             if let battery = model.battery {
                 PowerFlow(battery: battery, adapterOn: model.helper?.output.adapterOn ?? true)
                 DetailRow("Health", battery.healthPercent.map { "\($0)% · \(battery.cycleCount) cycles" })
@@ -300,12 +304,16 @@ struct HelperBanner: View {
         switch model.helperState {
         case .needsApproval: "Approve the chargnr helper"
         case .notAnswering: "The chargnr helper is not answering"
+        case .outdated(let version): "Update the chargnr helper (\(version) → \(Chargnr.version))"
         default: "Install the chargnr helper"
         }
     }
 
     private var detail: String {
-        model.usesNativeLimit
+        if case .outdated = model.helperState {
+            return "The helper still runs, but new features need the version that came with this app."
+        }
+        return model.usesNativeLimit
             ? "Limits of 80% and above already work through macOS. The helper adds lower limits, sailing, heat protection, top up and discharge."
             : "The helper runs in the background and switches charging. It needs your administrator password once."
     }
@@ -314,7 +322,48 @@ struct HelperBanner: View {
         switch model.helperState {
         case .needsApproval: "Open Login Items"
         case .notAnswering: "Reinstall Helper"
+        case .outdated: "Update Helper…"
         default: "Install Helper…"
         }
+    }
+}
+
+/// Battery level over the last 24 hours, with the limit as a dashed line and
+/// the stretches chargnr held charging back shaded.
+struct HistoryChart: View {
+    let samples: [HistorySample]
+    let limit: Int?
+
+    var body: some View {
+        Chart {
+            ForEach(Array(samples.enumerated()), id: \.offset) { _, sample in
+                AreaMark(x: .value("Time", sample.time), y: .value("Battery", sample.percent))
+                    .foregroundStyle(.green.opacity(0.18))
+                    .interpolationMethod(.stepEnd)
+                LineMark(x: .value("Time", sample.time), y: .value("Battery", sample.percent))
+                    .foregroundStyle(.green)
+                    .interpolationMethod(.stepEnd)
+            }
+            if let limit {
+                RuleMark(y: .value("Limit", limit))
+                    .foregroundStyle(.secondary)
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            }
+        }
+        .chartYScale(domain: 0...100)
+        .chartYAxis {
+            AxisMarks(values: [0, 50, 100]) { value in
+                AxisGridLine()
+                AxisValueLabel { Text("\(value.as(Int.self) ?? 0)%").font(.caption2) }
+            }
+        }
+        .chartXAxis {
+            AxisMarks(values: .stride(by: .hour, count: 6)) { _ in
+                AxisGridLine()
+                AxisValueLabel(format: .dateTime.hour(), centered: false).font(.caption2)
+            }
+        }
+        .frame(height: 70)
+        .accessibilityLabel("Battery level over the last 24 hours")
     }
 }

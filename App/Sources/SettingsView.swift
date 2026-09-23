@@ -43,7 +43,7 @@ struct SettingsView: View {
                         Text("Every 60 days").tag(60)
                         Text("Every 90 days").tag(90)
                     }
-                    .disabled(model.helperState != .running)
+                    .disabled(!model.helperRunning)
                     if let next = model.helper?.nextCalibration {
                         LabeledContent("Next run", value: next.formatted(date: .abbreviated, time: .shortened))
                     }
@@ -63,7 +63,7 @@ struct SettingsView: View {
                         Text("Green at the limit").tag(ChargeConfig.LEDMode.status)
                         Text("Off").tag(ChargeConfig.LEDMode.off)
                     }
-                    .disabled(model.helperState != .running || ledRefused)
+                    .disabled(!model.helperRunning || ledRefused)
                     if ledRefused {
                         Text("This Mac does not let apps change the MagSafe light.").font(.caption).foregroundStyle(.secondary)
                     }
@@ -74,7 +74,7 @@ struct SettingsView: View {
                 LabeledContent("Status", value: helperText)
                 LabeledContent("Charging control", value: controlText)
                 if let firmware = model.firmware { LabeledContent("Firmware", value: firmware) }
-                if model.helperState == .running {
+                if model.helperRunning {
                     Button("Remove Helper…") {
                         Task {
                             try? await HelperInstaller.uninstall()
@@ -111,6 +111,7 @@ struct SettingsView: View {
         case .notInstalled: "Not installed"
         case .needsApproval: "Waiting for approval in Login Items"
         case .notAnswering: "Not answering"
+        case .outdated(let version): "Running \(version), update available"
         }
     }
 

@@ -25,7 +25,8 @@ log.notice("chargnr-helper \(Chargnr.version, privacy: .public): \(caps.charging
 
 /// Every controller call runs on this queue.
 let queue = DispatchQueue(label: "\(Chargnr.helperID).control")
-let controller = Controller(actuator: Actuator(smc: smc, caps: caps),
+let historyStore = HistoryStore()
+let controller = Controller(actuator: Actuator(smc: smc, caps: caps), history: historyStore,
                             readBattery: { BatteryReading.read(smc) })
 // Best effort: macOS's own limit belongs to the user, so this may be refused
 // for root. The app and CLI re-sync it too.
@@ -137,6 +138,10 @@ final class Service: NSObject, HelperProtocol {
                 reply("could not save the config: \(error.localizedDescription)")
             }
         }
+    }
+
+    func history(since: Double, reply: @escaping @Sendable (Data?) -> Void) {
+        queue.async { reply(HistoryCSV.encode(historyStore.samples(since: Date(timeIntervalSince1970: since)))) }
     }
 
     func restoreNormal(reply: @escaping @Sendable (String?) -> Void) {

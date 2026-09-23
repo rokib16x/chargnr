@@ -103,9 +103,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Faster refresh only while the popover is open, for the live power readout.
     private func startLiveUpdates() {
-        Task { await model.refresh() }
+        Task {
+            await model.refresh()
+            await model.refreshHistory()
+        }
+        var ticks = 0
         liveTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            Task { await self?.model.refresh() }
+            ticks += 1
+            let reloadHistory = ticks % 20 == 0
+            Task {
+                await self?.model.refresh()
+                if reloadHistory { await self?.model.refreshHistory() }
+            }
         }
     }
 
@@ -161,6 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func snapshot(to path: String) async {
         await model.refresh()
+        await model.refreshHistory()
         render(PopoverView(model: model), to: path)
         render(SettingsView(model: model), to: path.replacingOccurrences(of: ".png", with: "-settings.png"))
         NSApp.terminate(nil)

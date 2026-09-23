@@ -39,7 +39,7 @@ final class Notifier {
             break
         }
 
-        if lastHelperState == .running, model.helperState == .notAnswering {
+        if lastHelperState?.answers == true, model.helperState == .notAnswering {
             post(.notifyHelper, "chargnr helper stopped", "Charging is back to normal until the helper runs again.")
         }
     }

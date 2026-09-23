@@ -10,6 +10,8 @@ import Foundation
     func setConfig(_ json: Data, reply: @escaping @Sendable (String?) -> Void)
     /// Charging on, adapter on, until the next config change.
     func restoreNormal(reply: @escaping @Sendable (String?) -> Void)
+    /// Replies with history samples newer than `since` (seconds since 1970), as CSV.
+    func history(since: Double, reply: @escaping @Sendable (Data?) -> Void)
 }
 
 public enum HelperService {
@@ -54,6 +56,12 @@ public final class HelperClient: Sendable {
         let json = (try? JSONEncoder().encode(config)) ?? Data()
         let error: String? = try await call { proxy, done in proxy.setConfig(json) { done($0) } }
         if let error { throw .refused(error) }
+    }
+
+    public func history(since: Date) async throws(Failure) -> [HistorySample] {
+        let data: Data? = try await call { proxy, done in proxy.history(since: since.timeIntervalSince1970) { done($0) } }
+        guard let data else { throw .badReply }
+        return HistoryCSV.decode(data)
     }
 
     public func restoreNormal() async throws(Failure) {

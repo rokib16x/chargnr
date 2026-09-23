@@ -20,6 +20,16 @@ enum HelperState: Equatable {
     case notInstalled
     case needsApproval
     case notAnswering
+    /// Running, but older than the app (for example after an app update).
+    case outdated(String)
+
+    /// The helper answers and takes commands (an outdated one still does).
+    var answers: Bool {
+        switch self {
+        case .running, .outdated: true
+        default: false
+        }
+    }
 }
 
 /// Everything the UI shows. Refreshed on power events and when the popover
@@ -36,6 +46,8 @@ final class AppModel {
     /// Shown briefly after a failed action.
     var errorMessage: String?
     private(set) var busy = false
+    /// The last 24 hours, loaded when the popover opens.
+    private(set) var history: [HistorySample] = []
 
     /// Called after every refresh with the new phase, for notifications and the status item.
     var onChange: ((AppModel) -> Void)?
@@ -81,8 +93,9 @@ final class AppModel {
         nativeLimit = NativeChargeLimit.read()
         if Installer.isInstalled || HelperInstaller.isEnabled {
             do {
-                helper = try await client.status()
-                helperState = .running
+                let status = try await client.status()
+                helper = status
+                helperState = status.version == Chargnr.version ? .running : .outdated(status.version)
                 // Put macOS's limit back if the helper ended a top up while we were away.
                 if await updater.syncNativeLimit() != nil { nativeLimit = NativeChargeLimit.read() }
             } catch {
@@ -95,6 +108,13 @@ final class AppModel {
         }
         onChange?(self)
     }
+
+    func refreshHistory() async {
+        guard helper != nil else { return }
+        history = (try? await client.history(since: Date().addingTimeInterval(-24 * 3600))) ?? []
+    }
+
+    var helperRunning: Bool { helperState.answers }
 
     // MARK: - Actions
 
