@@ -33,6 +33,7 @@ public struct HelperStatus: Codable, Equatable, Sendable {
     public var temperatureC: Double?
     /// Heat protection is pausing charging right now.
     public var heatHold: Bool?
+    public var topUpUntil: Date?
     public var lastError: String?
     /// Seconds until the next scheduled check.
     public var nextCheck: Int
@@ -70,7 +71,7 @@ public final class Controller: @unchecked Sendable {
     }
 
     public var method: ControlMethod {
-        ControlMethod.choose(for: config, caps: actuator.caps)
+        ControlMethod.choose(for: config.effective(at: now()), caps: actuator.caps)
     }
 
     /// Call once at launch. If the last run left switches changed (crash,
@@ -90,15 +91,38 @@ public final class Controller: @unchecked Sendable {
     public func tick() -> TimeInterval {
         reading = readBattery()
         if let reading {
+            endTopUpIfDone(reading)
             updateHeat(reading.temperatureC)
             let next = ChargePolicy.decide(PolicyInput(
-                config: config, method: method, percent: reading.percent, pluggedIn: reading.pluggedIn,
+                config: config.effective(at: now()), method: method, percent: reading.percent, pluggedIn: reading.pluggedIn,
                 hot: hotSince != nil, canInhibit: actuator.caps.canInhibit,
                 canCutAdapter: actuator.caps.canDisableAdapter, previous: output))
             apply(next)
         }
         return interval
     }
+
+    /// Ends a top up once the battery is full, the charger is unplugged, or
+    /// it has run out of time. A cut adapter reads as unplugged, but a top up
+    /// never cuts it, so an unplugged reading here is a real unplug.
+    private func endTopUpIfDone(_ reading: BatteryReading) {
+        guard let until = config.topUpUntil else { return }
+        let reason: String? =
+            now() >= until ? "time ran out"
+            : reading.percent >= 100 ? "battery full"
+            : !reading.pluggedIn && output.adapterOn ? "charger unplugged"
+            : nil
+        guard let reason else { return }
+        var ended = config
+        ended.topUpUntil = nil
+        try? configFile.save(ended)
+        config = ended
+        log.notice("top up ended: \(reason)")
+        onTopUpEnded?(ended)
+    }
+
+    /// Called when a top up ends, so the helper can put macOS's own limit back.
+    public var onTopUpEnded: (@Sendable (ChargeConfig) -> Void)?
 
     /// Starts holding at the heat limit; stops only once the battery has
     /// cooled a little and the cooldown has passed, so it does not flap.
@@ -159,6 +183,7 @@ public final class Controller: @unchecked Sendable {
         HelperStatus(version: Chargnr.version, config: config, method: method, output: output,
                      percent: reading?.percent, pluggedIn: reading?.pluggedIn,
                      temperatureC: reading?.temperatureC, heatHold: config.heatLimit == nil ? nil : hotSince != nil,
+                     topUpUntil: config.topUpUntil,
                      lastError: lastError,
                      nextCheck: Int(interval))
     }
@@ -169,6 +194,7 @@ public final class Controller: @unchecked Sendable {
     public var interval: TimeInterval {
         guard let reading else { return 300 }
         if output != .normal { return 20 }
+        if config.topUpUntil != nil { return 60 }
         // Temperature can climb within minutes while charging.
         if config.heatLimit != nil, reading.pluggedIn { return 60 }
         guard method != .none else { return 300 }

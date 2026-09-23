@@ -27,6 +27,14 @@ log.notice("chargnr-helper \(Chargnr.version): \(caps.charging.rawValue), adapte
 let queue = DispatchQueue(label: "\(Chargnr.helperID).control")
 let controller = Controller(actuator: Actuator(smc: smc, caps: caps),
                             readBattery: { BatteryReading.read(smc) })
+// Best effort: macOS's own limit belongs to the user, so this may be refused
+// for root. The app and CLI re-sync it too.
+controller.onTopUpEnded = { config in
+    guard caps.charging == .gated || caps.charging == .unsupported else { return }
+    do { try NativeChargeLimit.set(config.nativeTarget()) } catch {
+        log.notice("could not restore macOS limit after top up: \(String(describing: error))")
+    }
+}
 
 // MARK: - Loop
 

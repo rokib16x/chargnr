@@ -15,10 +15,38 @@ public struct ChargeConfig: Codable, Equatable, Sendable {
     /// nil turns heat protection off.
     public var heatLimit: Int?
 
-    public init(limit: Int = 100, gap: Int = ChargeConfig.defaultGap, heatLimit: Int? = nil) {
+    /// Charge to 100% once, ignoring the limit, until this time. Ends early
+    /// when the battery is full or the charger is unplugged.
+    public var topUpUntil: Date?
+
+    public init(limit: Int = 100, gap: Int = ChargeConfig.defaultGap, heatLimit: Int? = nil,
+                topUpUntil: Date? = nil) {
         self.limit = limit
         self.gap = gap
         self.heatLimit = heatLimit
+        self.topUpUntil = topUpUntil
+    }
+
+    /// A top up gives up after this long, so a forgotten one cannot keep the
+    /// battery at 100% for days.
+    public static let topUpMaximum: TimeInterval = 12 * 60 * 60
+
+    public func isToppingUp(at date: Date = Date()) -> Bool {
+        topUpUntil.map { date < $0 } ?? false
+    }
+
+    /// The config the policy should follow right now: no limit while topping up.
+    public func effective(at date: Date = Date()) -> ChargeConfig {
+        guard isToppingUp(at: date) else { return self }
+        var copy = self
+        copy.limit = 100
+        return copy
+    }
+
+    /// What macOS's own limit should be set to on gated firmware.
+    public func nativeTarget(at date: Date = Date()) -> Int {
+        let effective = effective(at: date)
+        return effective.isLimited ? max(effective.limit, NativeLimitRange.minimum) : 100
     }
 
     public static let limitRange = 20...100
@@ -54,10 +82,12 @@ public struct ChargeConfig: Codable, Equatable, Sendable {
     public func needsHelper(_ caps: Capabilities) -> Bool {
         ControlMethod.choose(for: self, caps: caps) != .none
             || (heatLimit != nil && (caps.canInhibit || caps.canDisableAdapter))
+            // The helper ends a top up; without it macOS would stay at 100%.
+            || (isToppingUp() && isLimited)
     }
 
     enum CodingKeys: String, CodingKey {
-        case limit, gap, heatLimit
+        case limit, gap, heatLimit, topUpUntil
     }
 
     public init(from decoder: any Decoder) throws {
@@ -66,5 +96,6 @@ public struct ChargeConfig: Codable, Equatable, Sendable {
         limit = try c.decodeIfPresent(Int.self, forKey: .limit) ?? defaults.limit
         gap = try c.decodeIfPresent(Int.self, forKey: .gap) ?? defaults.gap
         heatLimit = try c.decodeIfPresent(Int.self, forKey: .heatLimit)
+        topUpUntil = try c.decodeIfPresent(Date.self, forKey: .topUpUntil)
     }
 }

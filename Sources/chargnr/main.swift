@@ -12,6 +12,7 @@ let usage = """
       sailing POINTS     at the limit, pause charging until the battery drops
                          POINTS below it (1–20, default 5); sailing off = 1
       heat CELSIUS       pause charging while the battery is this hot (30–45); heat off
+      topup [cancel]     charge to 100% once, then return to the limit
       install            install the background helper (needs sudo)
       uninstall          remove the helper and restore normal charging (needs sudo)
       keys [--all|KEY…]  raw values of the SMC keys chargnr uses (--all: every key)
@@ -156,6 +157,10 @@ case "status":
     let options = Options(args)
     let smc = options.transport()
     let real = options.fake == nil
+    if real && Installer.isInstalled {
+        // Catch up macOS's limit if the helper ended a top up while we were away.
+        await ConfigUpdater(caps: Capabilities.detect(smc)).syncNativeLimit()
+    }
     let report = StatusReport.collect(smc: smc, battery: real ? BatteryInfo.current() : nil,
                                       nativeLimit: real ? NativeChargeLimit.read() : nil)
     let helper = real && Installer.isInstalled ? try? await HelperClient().status() : nil
@@ -170,6 +175,10 @@ case "status":
             let limit = helper.config.isLimited ? "limit \(helper.config.limit)% (resume at \(helper.config.resumeBelow)%)" : "no limit"
             print("Helper".padding(toLength: 18, withPad: " ", startingAt: 0)
                   + "running \(helper.version), \(limit), method \(helper.method.rawValue)")
+            if let until = helper.topUpUntil {
+                print("Top up".padding(toLength: 18, withPad: " ", startingAt: 0)
+                      + "charging to 100% (ends when full, on unplug, or at \(until.formatted(date: .omitted, time: .shortened)))")
+            }
             if let t = helper.temperatureC, let heat = helper.config.heatLimit {
                 print("Heat protection".padding(toLength: 18, withPad: " ", startingAt: 0)
                       + String(format: "%@ (battery %.1f °C, limit %d °C)", helper.heatHold == true ? "pausing charging" : "on", t, heat))
@@ -265,6 +274,19 @@ case "heat":
         print("Heat protection on: at \(limit) °C chargnr \(how) until the battery cools to \(limit - Int(ChargeConfig.heatHysteresis)) °C (at least \(Int(ChargeConfig.heatCooldown / 60)) min).")
     } else {
         print("Heat protection off.")
+    }
+case "topup":
+    let cancel = args.first == "cancel"
+    if cancel { args.removeFirst() }
+    let options = Options(args)
+    let until = Date().addingTimeInterval(ChargeConfig.topUpMaximum)
+    let outcome = await updateConfig(options, requireHelper: !cancel) { $0.topUpUntil = cancel ? nil : until }
+    if cancel {
+        print("Top up cancelled; back to the \(outcome.config.limit)% limit.")
+    } else if !outcome.config.isLimited {
+        print("No limit is set, so the battery already charges to 100%.")
+    } else {
+        print("Charging to 100% once. The \(outcome.config.limit)% limit comes back when the battery is full, when you unplug, or after 12 hours.")
     }
 case "install":
     let helper = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()

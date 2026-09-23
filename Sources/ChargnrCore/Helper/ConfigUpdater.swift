@@ -38,6 +38,18 @@ public struct ConfigUpdater: Sendable {
         (try? await client.status().config) ?? ChargeConfig()
     }
 
+    /// Puts macOS's own limit back in line with the helper's config, e.g.
+    /// after the helper ended a top up (it runs as root and cannot always
+    /// reach the user's PowerUI). Returns the value it set, if it changed.
+    @discardableResult
+    public func syncNativeLimit() async -> Int? {
+        guard usesNativeLimit, getuid() != 0, let config = try? await client.status().config,
+              let native = NativeChargeLimit.read() else { return nil }
+        let target = config.nativeTarget()
+        guard native.limit != target else { return nil }
+        return (try? NativeChargeLimit.set(target)) != nil ? target : nil
+    }
+
     public struct Outcome: Sendable {
         public let config: ChargeConfig
         public let method: ControlMethod
@@ -68,7 +80,7 @@ public struct ConfigUpdater: Sendable {
         // the helper cannot switch the adapter.
         if native {
             guard getuid() != 0 else { throw .runAsUser }
-            do { try NativeChargeLimit.set(max(config.limit, NativeLimitRange.minimum)) } catch {
+            do { try NativeChargeLimit.set(config.nativeTarget()) } catch {
                 throw .nativeLimit(error)
             }
         }

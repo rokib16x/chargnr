@@ -221,3 +221,79 @@ final class FakeClock: Sendable {
         #expect(ChargeConfig(limit: 85, heatLimit: 35).needsHelper(gated))
     }
 }
+
+@Suite struct TopUpTests {
+    func rig(_ profile: FakeSMC.Profile, config: ChargeConfig, clock: FakeClock)
+        throws -> (FakeSMC, FakeBattery, Controller, JSONFile<ChargeConfig>) {
+        let smc = FakeSMC(profile: profile)
+        let battery = FakeBattery()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let file = JSONFile<ChargeConfig>(dir.appendingPathComponent("config.json"))
+        try file.save(config)
+        let controller = Controller(actuator: Actuator(smc: smc, caps: Capabilities.detect(smc)),
+                                    configFile: file, marker: JSONFile(dir.appendingPathComponent("m.json")),
+                                    now: { clock.now }, readBattery: { battery.reading })
+        return (smc, battery, controller, file)
+    }
+
+    @Test func ignoresLimitUntilFull() throws {
+        let clock = FakeClock()
+        let until = clock.now.addingTimeInterval(ChargeConfig.topUpMaximum)
+        let (smc, battery, controller, file) = try rig(.tahoe, config: ChargeConfig(limit: 80, topUpUntil: until), clock: clock)
+        battery.reading = BatteryReading(percent: 85, pluggedIn: true)
+        controller.start()
+        #expect(try smc.read("CHTE") == [0, 0, 0, 0], "charging above the limit")
+
+        battery.reading.percent = 100
+        controller.tick()
+        #expect(file.load()?.topUpUntil == nil, "ended and saved")
+        #expect(try smc.read("CHTE") == [1, 0, 0, 0], "limit is back")
+    }
+
+    @Test func endsOnUnplug() throws {
+        let clock = FakeClock()
+        let (_, battery, controller, file) = try rig(.tahoe, config: ChargeConfig(limit: 80, topUpUntil: clock.now.addingTimeInterval(3600)), clock: clock)
+        battery.reading = BatteryReading(percent: 90, pluggedIn: true)
+        controller.start()
+        battery.reading.pluggedIn = false
+        controller.tick()
+        #expect(file.load()?.topUpUntil == nil)
+    }
+
+    @Test func expires() throws {
+        let clock = FakeClock()
+        let (smc, battery, controller, _) = try rig(.tahoe, config: ChargeConfig(limit: 80, topUpUntil: clock.now.addingTimeInterval(3600)), clock: clock)
+        battery.reading = BatteryReading(percent: 90, pluggedIn: true)
+        controller.start()
+        clock.advance(3601)
+        controller.tick()
+        #expect(controller.config.topUpUntil == nil)
+        #expect(try smc.read("CHTE") == [1, 0, 0, 0])
+    }
+
+    @Test func tellsHelperToRestoreMacOSLimit() throws {
+        let clock = FakeClock()
+        let (_, battery, controller, _) = try rig(.gated, config: ChargeConfig(limit: 85, topUpUntil: clock.now.addingTimeInterval(3600)), clock: clock)
+        let ended = OSAllocatedUnfairLock<ChargeConfig?>(initialState: nil)
+        controller.onTopUpEnded = { config in ended.withLock { $0 = config } }
+        battery.reading = BatteryReading(percent: 100, pluggedIn: true)
+        controller.start()
+        #expect(ended.withLock { $0 }?.nativeTarget() == 85)
+    }
+
+    @Test func heatStillWinsDuringTopUp() throws {
+        let clock = FakeClock()
+        let (smc, battery, controller, _) = try rig(.tahoe, config: ChargeConfig(limit: 80, heatLimit: 35, topUpUntil: clock.now.addingTimeInterval(3600)), clock: clock)
+        battery.reading = BatteryReading(percent: 85, pluggedIn: true, temperatureC: 40)
+        controller.start()
+        #expect(try smc.read("CHTE") == [1, 0, 0, 0])
+    }
+
+    @Test func nativeTargets() {
+        let now = Date()
+        #expect(ChargeConfig(limit: 60).nativeTarget(at: now) == 80)
+        #expect(ChargeConfig(limit: 90).nativeTarget(at: now) == 90)
+        #expect(ChargeConfig(limit: 100).nativeTarget(at: now) == 100)
+        #expect(ChargeConfig(limit: 60, topUpUntil: now.addingTimeInterval(60)).nativeTarget(at: now) == 100)
+    }
+}
