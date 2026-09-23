@@ -13,24 +13,49 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     ARCHS: arm64
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: YES
 targets:
   chargnr:
     type: application
     platform: macOS
     sources:
       - path: App/Sources
-      - path: App/Resources
+      - path: App/Resources/Info.plist
         buildPhase: none
+      - path: App/Resources/LaunchDaemons
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchDaemons
     dependencies:
       - package: chargnr
         product: ChargnrCore
+      - target: chargnr-helper
+        copy:
+          destination: executables
+      - sdk: ServiceManagement.framework
     settings:
       base:
         PRODUCT_NAME: chargnr
         PRODUCT_BUNDLE_IDENTIFIER: com.rokib16x.chargnr
         INFOPLIST_FILE: App/Resources/Info.plist
         GENERATE_INFOPLIST_FILE: NO
-        CODE_SIGN_IDENTITY: "-"
-        CODE_SIGN_STYLE: Manual
-        DEVELOPMENT_TEAM: ""
-        ENABLE_HARDENED_RUNTIME: YES
+  chargnr-helper:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/chargnr-helper
+    dependencies:
+      - package: chargnr
+        product: ChargnrCore
+    settings:
+      base:
+        PRODUCT_NAME: chargnr-helper
+        PRODUCT_BUNDLE_IDENTIFIER: com.rokib16x.chargnr.helper
+        SKIP_INSTALL: YES
+        # Gives the tool a real signing identifier instead of a random one.
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES

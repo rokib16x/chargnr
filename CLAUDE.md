@@ -23,17 +23,21 @@ Apple Silicon only, macOS 14+, with support for macOS 27's firmware charge limit
    dependencies unless the user agrees.
 5. Never write an SMC key without checking it exists and that the byte count
    matches its size. Every write is read back. Tests use `FakeSMC`, never real hardware.
+   Only `Actuator` writes charging keys. Anything that changes charging must check
+   its preconditions first, so a failed command changes nothing.
 
 ## Layout
 
 ```
 Package.swift            SwiftPM: core library, CLI, helper
-Sources/ChargnrCore      SMC types, transports (AppleSMC, FakeSMC), logic
+Sources/ChargnrCore      SMC/, Hardware/ (detection, readings, macOS limit), Control/ (policy,
+                         actuator, controller), Helper/ (XPC protocol, caller policy, installer)
 Sources/chargnr          CLI
-Sources/chargnr-helper   root daemon (phase 2: SMAppService + XPC)
+Sources/chargnr-helper   root daemon: charge loop, sleep hooks, XPC server
 App/                     menu bar app (Xcode target from project.yml)
 Tests/ChargnrCoreTests   swift-testing tests
 docs/hardware.md         SMC keys and firmware findings; update it when hardware facts change
+docs/helper.md           helper design: methods, safety rules, caller policy, install
 ```
 
 ## Build and run
@@ -54,7 +58,7 @@ open build/Build/Products/Debug/chargnr.app
 
 0. Repo, build, CI, fake hardware ← done
 1. Real AppleSMC transport, key-set detection (legacy / Tahoe / macOS 27 firmware), `chargnr status` ← done (see docs/hardware.md: firmware 20457.1 has no charge keys)
-2. Root helper: SMAppService, XPC with signing check, verified writes, watchdog, sleep hooks, overcharge guard
+2. Root helper: SMAppService, XPC with signing check, verified writes, crash recovery, sleep hooks ← done (needs hardware test)
 3. Charging logic: limit, sailing, heat, top up, discharge, adapter, MagSafe LED
 4. Menu bar UI, notifications, login item
 5. CLI parity, calibration + schedule, history, Shortcuts

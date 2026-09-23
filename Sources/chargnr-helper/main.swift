@@ -1,7 +1,164 @@
 import ChargnrCore
 import Foundation
+import IOKit.ps
+import IOKit.pwr_mgt
+import os
 
-// Root daemon placeholder. Phase 2 turns this into the SMAppService daemon that
-// owns every SMC write and serves the app and CLI over XPC.
-print("\(Chargnr.helperID) \(Chargnr.version): not implemented yet")
-exit(0)
+// chargnr-helper: the root daemon that owns every SMC write. launchd starts it
+// (KeepAlive), it serves the app and CLI over XPC, and it runs the charge loop
+// so limits hold even when the app is closed.
+
+let log = Logger(subsystem: Chargnr.helperID, category: "helper")
+
+guard getuid() == 0 else {
+    FileHandle.standardError.write(Data("chargnr-helper must run as root (it is started by launchd)\n".utf8))
+    exit(77)
+}
+
+let smc: AppleSMC
+do { smc = try AppleSMC() } catch {
+    log.fault("cannot open the SMC: \(String(describing: error))")
+    exit(69)
+}
+let caps = Capabilities.detect(smc)
+log.notice("chargnr-helper \(Chargnr.version): \(caps.charging.rawValue), adapter \(caps.adapterKey?.description ?? "none")")
+
+/// Every controller call runs on this queue.
+let queue = DispatchQueue(label: "\(Chargnr.helperID).control")
+let controller = Controller(actuator: Actuator(smc: smc, caps: caps),
+                            readBattery: { BatteryReading.read(smc) })
+
+// MARK: - Loop
+
+let timer = DispatchSource.makeTimerSource(queue: queue)
+@Sendable func schedule(_ seconds: TimeInterval) {
+    // Leeway lets macOS batch our wakeups with others.
+    timer.schedule(deadline: .now() + seconds, leeway: .seconds(max(1, Int(seconds / 10))))
+}
+timer.setEventHandler { schedule(controller.tick()) }
+
+queue.sync {
+    try? FileManager.default.createDirectory(at: HelperPaths.directory, withIntermediateDirectories: true)
+    controller.start()
+    schedule(controller.interval)
+}
+timer.resume()
+
+// Plugging in, unplugging and percentage changes trigger an immediate check.
+let powerSource = IOPSNotificationCreateRunLoopSource({ _ in
+    queue.async { schedule(controller.tick()) }
+}, nil).takeRetainedValue()
+CFRunLoopAddSource(CFRunLoopGetMain(), powerSource, .defaultMode)
+
+// MARK: - Sleep and wake
+
+// iokit_common_msg values; the C macros do not import into Swift.
+let canSystemSleep: UInt32 = 0xE000_0270
+let systemWillSleep: UInt32 = 0xE000_0280
+let systemHasPoweredOn: UInt32 = 0xE000_0300
+
+var rootPort: io_connect_t = 0
+var notifier: io_object_t = 0
+var notifyPort: IONotificationPortRef?
+rootPort = IORegisterForSystemPower(nil, &notifyPort, { _, _, messageType, argument in
+    let token = Int(bitPattern: argument)
+    switch messageType {
+    case canSystemSleep:
+        // Never veto sleep; act only once sleep is certain.
+        IOAllowPowerChange(rootPort, token)
+    case systemWillSleep:
+        queue.sync { controller.willSleep() }
+        IOAllowPowerChange(rootPort, token)
+    case systemHasPoweredOn:
+        queue.async { schedule(controller.tick()) }
+    default:
+        break
+    }
+}, &notifier)
+if rootPort != 0, let notifyPort {
+    CFRunLoopAddSource(CFRunLoopGetMain(), IONotificationPortGetRunLoopSource(notifyPort).takeUnretainedValue(), .defaultMode)
+} else {
+    log.error("could not register for sleep notifications")
+}
+
+// MARK: - Exit
+
+// launchd sends SIGTERM on uninstall, shutdown and restart: put everything back.
+let signalSources = [SIGTERM, SIGINT, SIGHUP].map { sig in
+    signal(sig, SIG_IGN)
+    let source = DispatchSource.makeSignalSource(signal: sig, queue: queue)
+    source.setEventHandler {
+        controller.restore()
+        log.notice("signal \(sig): restored normal charging, exiting")
+        exit(0)
+    }
+    source.resume()
+    return source
+}
+
+// MARK: - XPC
+
+final class Service: NSObject, HelperProtocol {
+    func status(reply: @escaping @Sendable (Data?) -> Void) {
+        queue.async { reply(try? JSONEncoder().encode(controller.status())) }
+    }
+
+    func setConfig(_ json: Data, reply: @escaping @Sendable (String?) -> Void) {
+        guard let config = try? JSONDecoder().decode(ChargeConfig.self, from: json) else {
+            reply("invalid config")
+            return
+        }
+        queue.async {
+            do {
+                try controller.setConfig(config)
+                schedule(controller.interval)
+                reply(nil)
+            } catch {
+                reply("could not save the config: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func restoreNormal(reply: @escaping @Sendable (String?) -> Void) {
+        queue.async {
+            do {
+                try controller.setConfig(ChargeConfig(limit: 100))
+                controller.restore()
+                reply(controller.status().lastError)
+            } catch {
+                reply(error.localizedDescription)
+            }
+        }
+    }
+}
+
+final class Listener: NSObject, NSXPCListenerDelegate {
+    let policy = CallerPolicy.current()
+
+    func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
+        switch policy {
+        case .team(let requirement):
+            // The kernel checks the caller's audit token against this on every message.
+            connection.setCodeSigningRequirement(requirement)
+        case .consoleUser:
+            guard CallerPolicy.isRootOrConsoleUser(connection.effectiveUserIdentifier) else {
+                log.notice("refused uid \(connection.effectiveUserIdentifier): not root or the console user")
+                return false
+            }
+        }
+        connection.exportedInterface = HelperService.interface()
+        connection.exportedObject = Service()
+        connection.resume()
+        return true
+    }
+}
+
+let delegate = Listener()
+let listener = NSXPCListener(machServiceName: HelperService.name)
+listener.delegate = delegate
+listener.resume()
+log.notice("listening as \(HelperService.name), callers: \(String(describing: delegate.policy))")
+
+withExtendedLifetime((timer, powerSource, signalSources, listener)) {
+    RunLoop.main.run()
+}
