@@ -16,12 +16,14 @@ let usage = """
       discharge PERCENT  run from battery while plugged in down to PERCENT (10–99)
       discharge cancel   stop discharging
       led MODE           MagSafe LED: status (green at the limit), off, or system
+      stop               cancel a top up, discharge or calibration
       calibrate [--to N] [--hold MIN]
                          discharge to N% (15), charge to 100%, hold MIN (60), resume limit
       calibrate cancel | skip
       schedule DAYS [--hour H]  calibrate every DAYS (7–90) from hour H (3); schedule off
       history [--hours N] [--json]
                          battery history recorded by the helper (default 24 h, up to 30 days)
+      config             print the helper's settings as JSON
       install            install the background helper (needs sudo)
       uninstall          remove the helper and restore normal charging (needs sudo)
       keys [--all|KEY…]  raw values of the SMC keys chargnr uses (--all: every key)
@@ -186,9 +188,11 @@ case "status":
                                       nativeLimit: real ? NativeChargeLimit.read() : nil)
     let helper = real && Installer.isInstalled ? try? await HelperClient().status() : nil
     if options.json {
+        struct Full: Encodable { let mac: StatusReport; let helper: HelperStatus? }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        print(String(decoding: try encoder.encode(report), as: UTF8.self))
+        encoder.dateEncodingStrategy = .iso8601
+        print(String(decoding: try encoder.encode(Full(mac: report, helper: helper)), as: UTF8.self))
     } else {
         printStatus(report)
         print("")
@@ -472,6 +476,20 @@ case "history":
         }
         bucket = bucket.addingTimeInterval(hours > 48 ? 6 * 3600 : 3600)
     }
+case "stop":
+    let outcome = await updateConfig(Options(args)) {
+        $0.topUpUntil = nil
+        $0.dischargeTo = nil
+        $0.calibration = nil
+    }
+    print(outcome.config.isLimited ? "Stopped; back to the \(outcome.config.limit)% limit." : "Stopped; charging normally.")
+case "config":
+    let config: ChargeConfig
+    do { config = try await HelperClient().status().config } catch { fail("\(error)", code: 69) }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    encoder.dateEncodingStrategy = .iso8601
+    print(String(decoding: try encoder.encode(config), as: UTF8.self))
 case "install":
     // Next to the CLI: .build/release, Homebrew, or chargnr.app/Contents/MacOS.
     let here = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath().deletingLastPathComponent()

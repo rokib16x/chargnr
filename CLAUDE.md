@@ -57,6 +57,8 @@ build/Build/Products/Debug/chargnr.app/Contents/MacOS/chargnr --snapshot /tmp/p.
 - The Xcode scheme is `chargnr-app`: the Swift package also has a `chargnr`
   scheme (the CLI), and `-scheme chargnr` silently builds that instead.
 - The app bundle carries `Contents/MacOS/chargnr-helper` and `chargnr-cli`.
+- Commit only the files you changed (`git add <paths>`), never `git add -A`:
+  other work may be in progress in the tree.
 - Signed ad hoc for now (`CODE_SIGN_IDENTITY = -`). Ad-hoc builds install the
   helper through the embedded CLI with an administrator password prompt;
   team-signed builds use SMAppService.
@@ -68,5 +70,5 @@ build/Build/Products/Debug/chargnr.app/Contents/MacOS/chargnr --snapshot /tmp/p.
 2. Root helper: SMAppService, XPC with signing check, verified writes, crash recovery, sleep hooks ← done (needs hardware test)
 3. Charging logic: limit, sailing, heat, top up, discharge, adapter, MagSafe LED ← done (needs hardware test)
 4. Menu bar UI, notifications, login item ← done
-5. CLI parity, calibration + schedule, history, Shortcuts
+5. CLI parity, calibration + schedule, history, Shortcuts ← done (needs hardware test)
 6. Signing, notarization, DMG, Homebrew cask

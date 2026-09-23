@@ -13,6 +13,7 @@ that stops charging at the level you choose.
 - Stop charging during sleep, and never overcharge if the app stalls
 - MagSafe LED control
 - Battery calibration with a schedule
+- 30 days of battery history, with a 24-hour chart
 - `chargnr` command-line tool and Shortcuts actions
 - Works with macOS 27's firmware charge limit, macOS 26 Tahoe and older firmware
 
