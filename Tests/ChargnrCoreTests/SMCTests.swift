@@ -22,8 +22,8 @@ import Testing
         let smc = FakeSMC(profile: profile)
         #expect(smc.exists("BUIC"))
         #expect(smc.exists("CH0B") == (profile == .legacy))
-        #expect(smc.exists("CHTE") == (profile == .tahoe || profile == .firmware))
-        #expect(smc.exists("bfF0") == (profile == .firmware))
+        #expect(smc.exists("CHTE") == (profile == .tahoe || profile == .firmwareLimit))
+        #expect(smc.exists("bfF0") == (profile == .firmwareLimit))
     }
 
     @Test func verifiedWriteStoresAndReadsBack() throws {
