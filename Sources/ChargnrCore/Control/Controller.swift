@@ -6,11 +6,14 @@ public struct BatteryReading: Equatable, Sendable {
     public var percent: Int
     public var pluggedIn: Bool
     public var temperatureC: Double?
+    /// Whether the battery is taking charge (IOKit), when known.
+    public var isCharging: Bool?
 
-    public init(percent: Int, pluggedIn: Bool, temperatureC: Double? = nil) {
+    public init(percent: Int, pluggedIn: Bool, temperatureC: Double? = nil, isCharging: Bool? = nil) {
         self.percent = percent
         self.pluggedIn = pluggedIn
         self.temperatureC = temperatureC
+        self.isCharging = isCharging
     }
 
     /// Reads the SMC, which answers even when IOKit's battery service lags.
@@ -18,7 +21,8 @@ public struct BatteryReading: Equatable, Sendable {
         let state = ChargeState.read(smc, Capabilities(charging: .unsupported, canInhibit: false, adapterKey: nil,
                                                        magSafeLED: false, temperature: smc.exists(SMCKeys.batteryTemperature)))
         guard let percent = state.percent, let plugged = state.pluggedIn else { return nil }
-        return BatteryReading(percent: percent, pluggedIn: plugged, temperatureC: state.temperatureC)
+        return BatteryReading(percent: percent, pluggedIn: plugged, temperatureC: state.temperatureC,
+                              isCharging: BatteryInfo.current()?.isCharging)
     }
 }
 
@@ -57,6 +61,8 @@ public final class Controller: @unchecked Sendable {
     private var lastError: String?
     /// When heat protection started holding, or nil when it is not.
     private var hotSince: Date?
+    /// Set once an LED write fails, so a Mac that refuses it is not retried every tick.
+    private var ledRefused: String?
 
     public init(actuator: Actuator,
                 configFile: JSONFile<ChargeConfig> = JSONFile(HelperPaths.config),
@@ -95,10 +101,17 @@ public final class Controller: @unchecked Sendable {
             endTopUpIfDone(reading)
             endDischargeIfDone(reading)
             updateHeat(reading.temperatureC)
-            let next = ChargePolicy.decide(PolicyInput(
-                config: config.effective(at: now()), method: method, percent: reading.percent, pluggedIn: reading.pluggedIn,
+            let effective = config.effective(at: now())
+            var next = ChargePolicy.decide(PolicyInput(
+                config: effective, method: method, percent: reading.percent, pluggedIn: reading.pluggedIn,
                 hot: hotSince != nil, discharging: config.dischargeTo != nil, canInhibit: actuator.caps.canInhibit,
                 canCutAdapter: actuator.caps.canDisableAdapter, previous: output))
+            if ledRefused == nil {
+                let charging = reading.isCharging
+                    ?? (next.chargingAllowed && reading.percent < min(effective.limit, 100))
+                next.led = MagSafeLED.value(for: config.led, pluggedIn: reading.pluggedIn,
+                                            adapterOn: next.adapterOn, charging: charging)
+            }
             apply(next)
         }
         return interval
@@ -187,6 +200,8 @@ public final class Controller: @unchecked Sendable {
     public func restore() {
         do {
             try actuator.restoreNormal()
+            // Hand the LED back to macOS only if chargnr (now or in a crashed run) set it.
+            if output.led != nil || marker.load()?.led != nil { try? actuator.setLED(MagSafeLED.system) }
             output = .normal
             marker.remove()
             lastError = nil
@@ -220,20 +235,49 @@ public final class Controller: @unchecked Sendable {
     }
 
     private func apply(_ next: ChargeOutput) {
-        guard next != output || actuator.current() != next else { return }
+        guard next != output || !matchesHardware(next) else { return }
+        var switches = next
+        switches.led = nil
         do {
             // Record intent first, so a crash mid-write still triggers a restore.
             if next != .normal { try? marker.save(next) }
-            try actuator.apply(next)
-            if next == .normal { marker.remove() }
-            if next != output {
-                log.notice("charging \(next.chargingAllowed ? "on" : "off"), adapter \(next.adapterOn ? "on" : "off")")
-            }
-            output = next
-            lastError = nil
+            try actuator.apply(switches)
+            lastError = ledRefused
         } catch {
             lastError = "\(error)"
             log.error("apply failed: \(String(describing: error))")
+            return
         }
+        if switches.chargingAllowed != output.chargingAllowed || switches.adapterOn != output.adapterOn {
+            log.notice("charging \(next.chargingAllowed ? "on" : "off"), adapter \(next.adapterOn ? "on" : "off")")
+        }
+        switches.led = applyLED(next.led)
+        output = switches
+        if output == .normal { marker.remove() }
+    }
+
+    /// Sets the LED on its own, so a Mac that refuses LED writes keeps full
+    /// charging control. Returns the value now owned, or nil for macOS.
+    private func applyLED(_ led: UInt8?) -> UInt8? {
+        guard let led else {
+            // Leaving an LED mode: give the LED back to macOS once.
+            if output.led != nil { try? actuator.setLED(MagSafeLED.system) }
+            return nil
+        }
+        do {
+            try actuator.setLED(led)
+            return led
+        } catch {
+            ledRefused = "MagSafe LED control refused by this Mac (\(error))"
+            lastError = ledRefused
+            log.error("LED write failed; LED control off until restart")
+            return nil
+        }
+    }
+
+    private func matchesHardware(_ target: ChargeOutput) -> Bool {
+        let hardware = actuator.current()
+        return hardware.chargingAllowed == target.chargingAllowed && hardware.adapterOn == target.adapterOn
+            && (target.led == nil || hardware.led == target.led)
     }
 }

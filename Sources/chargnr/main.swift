@@ -15,6 +15,7 @@ let usage = """
       topup [cancel]     charge to 100% once, then return to the limit
       discharge PERCENT  run from battery while plugged in down to PERCENT (10–99)
       discharge cancel   stop discharging
+      led MODE           MagSafe LED: status (green at the limit), off, or system
       install            install the background helper (needs sudo)
       uninstall          remove the helper and restore normal charging (needs sudo)
       keys [--all|KEY…]  raw values of the SMC keys chargnr uses (--all: every key)
@@ -174,9 +175,13 @@ case "status":
         printStatus(report)
         print("")
         if let helper {
-            let limit = helper.config.isLimited ? "limit \(helper.config.limit)% (resume at \(helper.config.resumeBelow)%)" : "no limit"
+            let limit = helper.config.isLimited
+                ? "limit \(helper.config.limit)%, sailing \(helper.config.gap) (resume below \(helper.config.resumeBelow)%)" : "no limit"
             print("Helper".padding(toLength: 18, withPad: " ", startingAt: 0)
                   + "running \(helper.version), \(limit), method \(helper.method.rawValue)")
+            if helper.config.led != .system {
+                print("LED mode".padding(toLength: 18, withPad: " ", startingAt: 0) + helper.config.led.rawValue)
+            }
             if let until = helper.topUpUntil {
                 print("Top up".padding(toLength: 18, withPad: " ", startingAt: 0)
                       + "charging to 100% (ends when full, on unplug, or at \(until.formatted(date: .omitted, time: .shortened)))")
@@ -318,6 +323,20 @@ case "discharge":
         print("Discharging to \(target)% while plugged in. The Mac stays awake until then; sleep pauses it.")
     } else {
         print("Discharge stopped.")
+    }
+case "led":
+    guard let value = args.popFirst(), let mode = ChargeConfig.LEDMode(rawValue: value) else {
+        fail("usage: chargnr led status | off | system")
+    }
+    let options = Options(args)
+    guard mode == .system || Capabilities.detect(options.transport()).magSafeLED else {
+        fail("this Mac has no MagSafe LED chargnr can control")
+    }
+    _ = await updateConfig(options, requireHelper: mode != .system) { $0.led = mode }
+    switch mode {
+    case .status: print("MagSafe LED: orange while charging, green when the limit holds or the battery is full.")
+    case .off: print("MagSafe LED off while plugged in.")
+    case .system: print("MagSafe LED back to macOS.")
     }
 case "install":
     let helper = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()

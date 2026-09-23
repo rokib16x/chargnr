@@ -86,7 +86,8 @@ import Testing
         let actuator = Actuator(smc: smc, caps: Capabilities.detect(smc))
         try actuator.apply(ChargeOutput(chargingAllowed: false, adapterOn: true))
         #expect(try smc.read("CHTE") == [1, 0, 0, 0])
-        #expect(actuator.current() == ChargeOutput(chargingAllowed: false, adapterOn: true))
+        #expect(actuator.current().chargingAllowed == false)
+        #expect(actuator.current().adapterOn == true)
     }
 
     @Test func inhibitsBothLegacyKeys() throws {

@@ -345,3 +345,64 @@ final class FakeClock: Sendable {
         #expect(rig.controller.config.dischargeTo == nil)
     }
 }
+
+@Suite struct MagSafeLEDTests {
+    @Test func greenAtLimitOrangeWhileCharging() throws {
+        let rig = try Rig(.tahoe, config: ChargeConfig(limit: 80, led: .status))
+        rig.controller.start()
+        rig.set(60)
+        #expect(try rig.smc.read("ACLC") == [MagSafeLED.orange])
+        rig.set(80)
+        #expect(try rig.smc.read("ACLC") == [MagSafeLED.green])
+    }
+
+    @Test func usesIOKitChargingWhenKnown() throws {
+        let rig = try Rig(.gated, config: ChargeConfig(limit: 85, led: .status))
+        rig.battery.reading = BatteryReading(percent: 70, pluggedIn: true, isCharging: false)
+        rig.controller.start()
+        #expect(try rig.smc.read("ACLC") == [MagSafeLED.green], "macOS's own limit is holding")
+    }
+
+    @Test func writesOnlyOnChange() throws {
+        let rig = try Rig(.tahoe, config: ChargeConfig(led: .off))
+        rig.controller.start()
+        rig.set(50)
+        rig.set(51)
+        rig.set(52)
+        #expect(rig.smc.writes.filter { $0.key == "ACLC" }.count == 1)
+    }
+
+    @Test func handsBackToMacOSOnModeChangeAndRestore() throws {
+        let rig = try Rig(.tahoe, config: ChargeConfig(led: .off))
+        rig.controller.start()
+        rig.set(50)
+        #expect(try rig.smc.read("ACLC") == [MagSafeLED.off])
+        try rig.controller.setConfig(ChargeConfig(led: .system))
+        #expect(try rig.smc.read("ACLC") == [MagSafeLED.system])
+
+        try rig.controller.setConfig(ChargeConfig(led: .off))
+        rig.controller.restore()
+        #expect(try rig.smc.read("ACLC") == [MagSafeLED.system])
+    }
+
+    @Test func leavesLEDAloneInSystemMode() throws {
+        let rig = try Rig(.tahoe, config: ChargeConfig(limit: 80))
+        rig.smc.set("ACLC", type: "ui8 ", [MagSafeLED.green]) // macOS's own value
+        rig.controller.start()
+        rig.set(85)
+        #expect(!rig.smc.writes.contains { $0.key == "ACLC" })
+    }
+
+    @Test func refusedLEDKeepsChargingControl() throws {
+        let rig = try Rig(.tahoe, config: ChargeConfig(limit: 80, led: .status))
+        rig.smc.gate("ACLC")
+        rig.controller.start()
+        rig.set(85)
+        #expect(try rig.smc.read("CHTE") == [1, 0, 0, 0])
+        #expect(rig.controller.status().lastError?.contains("LED") == true)
+    }
+
+    @Test func darkWhenAdapterCut() {
+        #expect(MagSafeLED.value(for: .status, pluggedIn: true, adapterOn: false, charging: false) == nil)
+    }
+}

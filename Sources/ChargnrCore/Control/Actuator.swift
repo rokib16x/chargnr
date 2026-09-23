@@ -22,6 +22,13 @@ public final class Actuator: Sendable {
         for (key, value) in chargingWrites(allowed: output.chargingAllowed) + adapterWrites(on: output.adapterOn) {
             try write(key, value)
         }
+        if let led = output.led { try setLED(led) }
+    }
+
+    /// Sets the MagSafe LED; `MagSafeLED.system` hands it back to macOS.
+    public func setLED(_ value: UInt8) throws(Failure) {
+        guard caps.magSafeLED else { return }
+        try write(SMCKeys.magSafeLED, [value])
     }
 
     /// Charging allowed, adapter on. Safe to call at any time, even if chargnr
@@ -34,7 +41,8 @@ public final class Actuator: Sendable {
     public func current() -> ChargeOutput {
         let state = ChargeState.read(smc, caps)
         return ChargeOutput(chargingAllowed: !(state.chargingInhibited ?? false),
-                            adapterOn: !(state.adapterDisabled ?? false))
+                            adapterOn: !(state.adapterDisabled ?? false),
+                            led: state.magSafeLED)
     }
 
     private func chargingWrites(allowed: Bool) -> [(SMCKey, [UInt8])] {

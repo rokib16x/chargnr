@@ -59,7 +59,7 @@ open build/Build/Products/Debug/chargnr.app
 0. Repo, build, CI, fake hardware ← done
 1. Real AppleSMC transport, key-set detection (legacy / Tahoe / macOS 27 firmware), `chargnr status` ← done (see docs/hardware.md: firmware 20457.1 has no charge keys)
 2. Root helper: SMAppService, XPC with signing check, verified writes, crash recovery, sleep hooks ← done (needs hardware test)
-3. Charging logic: limit, sailing, heat, top up, discharge, adapter, MagSafe LED
+3. Charging logic: limit, sailing, heat, top up, discharge, adapter, MagSafe LED ← done (needs hardware test)
 4. Menu bar UI, notifications, login item
 5. CLI parity, calibration + schedule, history, Shortcuts
 6. Signing, notarization, DMG, Homebrew cask

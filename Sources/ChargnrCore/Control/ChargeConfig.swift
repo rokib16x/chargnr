@@ -23,13 +23,25 @@ public struct ChargeConfig: Codable, Equatable, Sendable {
     /// percentage, then clear. nil when not discharging.
     public var dischargeTo: Int?
 
+    public enum LEDMode: String, Codable, CaseIterable, Sendable {
+        /// macOS decides (orange until 100%, even when a limit holds it lower).
+        case system
+        /// Orange while charging, green when the limit holds or the battery is full.
+        case status
+        /// Always off while plugged in.
+        case off
+    }
+
+    public var led: LEDMode
+
     public init(limit: Int = 100, gap: Int = ChargeConfig.defaultGap, heatLimit: Int? = nil,
-                topUpUntil: Date? = nil, dischargeTo: Int? = nil) {
+                topUpUntil: Date? = nil, dischargeTo: Int? = nil, led: LEDMode = .system) {
         self.limit = limit
         self.gap = gap
         self.heatLimit = heatLimit
         self.topUpUntil = topUpUntil
         self.dischargeTo = dischargeTo
+        self.led = led
     }
 
     public static let dischargeRange = 10...99
@@ -93,10 +105,11 @@ public struct ChargeConfig: Codable, Equatable, Sendable {
             // The helper ends a top up; without it macOS would stay at 100%.
             || (isToppingUp() && isLimited)
             || dischargeTo != nil
+            || (led != .system && caps.magSafeLED)
     }
 
     enum CodingKeys: String, CodingKey {
-        case limit, gap, heatLimit, topUpUntil, dischargeTo
+        case limit, gap, heatLimit, topUpUntil, dischargeTo, led
     }
 
     public init(from decoder: any Decoder) throws {
@@ -107,5 +120,6 @@ public struct ChargeConfig: Codable, Equatable, Sendable {
         heatLimit = try c.decodeIfPresent(Int.self, forKey: .heatLimit)
         topUpUntil = try c.decodeIfPresent(Date.self, forKey: .topUpUntil)
         dischargeTo = try c.decodeIfPresent(Int.self, forKey: .dischargeTo)
+        led = (try? c.decodeIfPresent(LEDMode.self, forKey: .led)) ?? .system
     }
 }

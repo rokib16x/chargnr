@@ -34,12 +34,36 @@ public enum NativeLimitRange {
 public struct ChargeOutput: Codable, Equatable, Sendable {
     public var chargingAllowed: Bool
     public var adapterOn: Bool
+    /// MagSafe LED value chargnr has set, or nil when macOS controls it.
+    public var led: UInt8?
 
     public static let normal = ChargeOutput(chargingAllowed: true, adapterOn: true)
 
-    public init(chargingAllowed: Bool, adapterOn: Bool) {
+    public init(chargingAllowed: Bool, adapterOn: Bool, led: UInt8? = nil) {
         self.chargingAllowed = chargingAllowed
         self.adapterOn = adapterOn
+        self.led = led
+    }
+}
+
+/// MagSafe LED values (ACLC).
+public enum MagSafeLED {
+    public static let system: UInt8 = 0
+    public static let off: UInt8 = 1
+    public static let green: UInt8 = 3
+    public static let orange: UInt8 = 4
+
+    /// The LED value for `mode`, or nil to leave it to macOS.
+    /// - Parameter charging: whether the battery is taking charge right now.
+    public static func value(for mode: ChargeConfig.LEDMode, pluggedIn: Bool, adapterOn: Bool,
+                             charging: Bool) -> UInt8? {
+        // Unplugged or running from battery: the LED is dark anyway.
+        guard pluggedIn, adapterOn else { return nil }
+        switch mode {
+        case .system: return nil
+        case .off: return off
+        case .status: return charging ? orange : green
+        }
     }
 }
 

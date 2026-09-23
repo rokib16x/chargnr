@@ -15,6 +15,32 @@ over XPC as `com.rokib16x.chargnr.helper`.
 | Gated (20457.1+) | 80–100% | `none`: macOS's own limit via PowerUI, set by the app/CLI as the user | macOS, also during sleep |
 | Gated (20457.1+) | 20–79% | `adapter` (CHIE) + macOS limit at 80% as a sleep floor | helper while awake, macOS while asleep |
 
+## Features and precedence
+
+The policy combines these, strongest first:
+
+1. **Force discharge** (`discharge PERCENT`): adapter off until the battery is
+   down to PERCENT, then clears. Holds a prevent-idle-sleep assertion; if the
+   Mac sleeps anyway the adapter is restored and it resumes on wake.
+2. **Heat protection** (`heat CELSIUS`): at the limit temperature, stop
+   charging (inhibit keys) or cut the adapter (gated firmware). Resumes only
+   2 °C cooler and at least 5 minutes later. Only ever switches things off.
+3. **Top up** (`topup`): ignore the limit until full, unplugged, or 12 hours.
+   On gated firmware macOS's limit is lifted to 100% and put back afterwards
+   (by the helper if root may, otherwise by the next `chargnr` command or the app).
+4. **Limit and sailing** (`limit`, `sailing`): stop at the limit, resume
+   `gap` points below it. The adapter method keeps a band of at least 3.
+
+**MagSafe LED** (`led status|off|system`) is set after the switches, only when
+its value changes. `status` shows orange while the battery takes charge
+(IOKit `IsCharging`) and green otherwise. The LED is handed back to macOS
+(`ACLC = 0`) when leaving an LED mode, on restore, and after a crash. If a Mac
+refuses LED writes, LED control switches off for the session and charging
+control carries on.
+
+Top up and discharge cancel each other. Settings that need the helper fail up
+front when it is not running.
+
 ## Safety rules
 
 - **Only `Actuator` writes charging keys.** It skips writes already in place,
