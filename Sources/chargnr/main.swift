@@ -9,6 +9,8 @@ let usage = """
       status [--json]    battery, charging state and what this Mac supports
       limit PERCENT      stop charging at PERCENT (20–100) [--gap N, default 5]
       limit off          charge normally
+      sailing POINTS     at the limit, pause charging until the battery drops
+                         POINTS below it (1–20, default 5); sailing off = 1
       install            install the background helper (needs sudo)
       uninstall          remove the helper and restore normal charging (needs sudo)
       keys [--all|KEY…]  raw values of the SMC keys chargnr uses (--all: every key)
@@ -75,6 +77,14 @@ struct Options {
         if let fake { return FakeSMC(profile: fake) }
         do { return try AppleSMC() } catch { fail("cannot open the SMC (\(error))", code: 69) }
     }
+}
+
+/// Applies a config change through the helper (and macOS's limit where used).
+func updateConfig(_ options: Options, requireHelper: Bool = false,
+                  _ change: @escaping @Sendable (inout ChargeConfig) -> Void) async -> ConfigUpdater.Outcome {
+    guard options.fake == nil else { fail("this command only works on the real Mac") }
+    let updater = ConfigUpdater(caps: Capabilities.detect(options.transport()))
+    do { return try await updater.update(requireHelper: requireHelper, change) } catch { fail("\(error)", code: 69) }
 }
 
 func hex(_ bytes: [UInt8]) -> String {
@@ -194,44 +204,44 @@ case "keys":
 case "limit":
     guard let value = args.popFirst() else { fail("usage: chargnr limit PERCENT | off") }
     let options = Options(args)
-    guard options.fake == nil else { fail("limit only works on the real Mac") }
     let percent: Int
     if value == "off" { percent = 100 } else {
         guard let number = Int(value.trimmingCharacters(in: CharacterSet(charactersIn: "%"))),
               ChargeConfig.limitRange.contains(number) else { fail("limit must be 20–100 or off") }
         percent = number
     }
-    let config = ChargeConfig(limit: percent, gap: options.gap ?? ChargeConfig().gap)
-    let caps = Capabilities.detect(options.transport())
-    let usesNative = (caps.charging == .gated || caps.charging == .unsupported) && NativeChargeLimit.read() != nil
-
-    let needsHelper = ControlMethod.choose(for: config, caps: caps) != .none
-    let client = HelperClient()
-
-    // Check the helper first so a failure changes nothing.
-    if needsHelper {
-        do { _ = try await client.status() } catch { fail("\(error)", code: 69) }
+    let gap = options.gap
+    let outcome = await updateConfig(options) { config in
+        config.limit = percent
+        if let gap { config.gap = gap }
     }
-    // On gated firmware macOS enforces 80%+ itself. For lower limits it is
-    // set to 80% as a floor, so charging stays capped while the Mac sleeps
-    // and the helper cannot switch the adapter.
-    if usesNative {
-        guard getuid() != 0 else { fail("run limit without sudo: macOS's own limit belongs to your user") }
-        do { try NativeChargeLimit.set(max(percent, NativeLimitRange.minimum)) } catch {
-            fail("macOS refused the charge limit: \(error)", code: 70)
-        }
-    }
-    do {
-        try await client.setConfig(config)
-    } catch {
-        // Without the helper, 80%+ on gated firmware still works through macOS.
-        if needsHelper { fail("\(error)", code: 69) }
-    }
-    switch (percent, needsHelper, usesNative) {
+    let c = outcome.config
+    switch (c.limit, outcome.method, outcome.usesNativeLimit) {
     case (100, _, _): print("Charging normally.")
-    case (_, false, true): print("Limit \(percent)%, enforced by macOS (also during sleep).")
-    case (_, true, true): print("Limit \(percent)%, held by the helper switching the adapter; macOS caps sleep charging at 80%.")
-    default: print("Limit \(percent)%, resume below \(config.resumeBelow)%.")
+    case (_, .none, true): print("Limit \(c.limit)%, enforced by macOS (also during sleep).")
+    case (_, .adapter, true): print("Limit \(c.limit)%: the helper switches the adapter off at \(c.limit)% and back on below \(c.resumeBelow)%. macOS caps sleep charging at 80%.")
+    default: print("Limit \(c.limit)%, charging resumes below \(c.resumeBelow)%.")
+    }
+case "sailing":
+    guard let value = args.popFirst() else { fail("usage: chargnr sailing POINTS | off") }
+    let options = Options(args)
+    let gap: Int
+    if value == "off" { gap = ChargeConfig.noSailingGap } else {
+        guard let number = Int(value), ChargeConfig.gapRange.contains(number) else {
+            fail("sailing must be \(ChargeConfig.gapRange.lowerBound)–\(ChargeConfig.gapRange.upperBound) points or off")
+        }
+        gap = number
+    }
+    let outcome = await updateConfig(options, requireHelper: true) { $0.gap = gap }
+    let c = outcome.config
+    if !c.isLimited {
+        print("Sailing \(c.gap) points saved; it applies once you set a limit below 100%.")
+    } else if outcome.method == .none && outcome.usesNativeLimit {
+        print("Sailing \(c.gap) points saved. macOS's own limit decides when to resume at \(c.limit)%; sailing applies to limits below 80%.")
+    } else if gap == ChargeConfig.noSailingGap {
+        print("Sailing off: charging resumes as soon as the battery drops below \(c.limit)%.")
+    } else {
+        print("Sailing \(c.gap) points: at \(c.limit)% charging pauses until the battery drops below \(c.resumeBelow)%.")
     }
 case "install":
     let helper = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()

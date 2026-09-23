@@ -141,3 +141,35 @@ import Testing
         #expect(JSONFile<ChargeConfig>(url).load() == nil)
     }
 }
+
+@Suite struct ChargeConfigCodingTests {
+    @Test func oldConfigWithoutNewFieldsLoads() throws {
+        let config = try JSONDecoder().decode(ChargeConfig.self, from: Data(#"{"limit": 70}"#.utf8))
+        #expect(config == ChargeConfig(limit: 70, gap: ChargeConfig.defaultGap))
+    }
+
+    @Test func emptyObjectIsDefault() throws {
+        #expect(try JSONDecoder().decode(ChargeConfig.self, from: Data("{}".utf8)) == ChargeConfig())
+    }
+
+    @Test func roundTrips() throws {
+        let config = ChargeConfig(limit: 65, gap: 9)
+        #expect(try JSONDecoder().decode(ChargeConfig.self, from: JSONEncoder().encode(config)) == config)
+    }
+}
+
+@Suite struct SailingTests {
+    @Test func sailingOffResumesAfterOnePoint() {
+        let config = ChargeConfig(limit: 80, gap: ChargeConfig.noSailingGap)
+        let held = ChargeOutput(chargingAllowed: false, adapterOn: true)
+        #expect(ChargePolicy.decide(config: config, method: .inhibit, percent: 80, pluggedIn: true, previous: .normal) == held)
+        #expect(ChargePolicy.decide(config: config, method: .inhibit, percent: 79, pluggedIn: true, previous: held) == .normal)
+    }
+
+    @Test func wideSailingHoldsLonger() {
+        let config = ChargeConfig(limit: 80, gap: 15)
+        let held = ChargeOutput(chargingAllowed: false, adapterOn: true)
+        #expect(ChargePolicy.decide(config: config, method: .inhibit, percent: 66, pluggedIn: true, previous: held) == held)
+        #expect(ChargePolicy.decide(config: config, method: .inhibit, percent: 65, pluggedIn: true, previous: held) == .normal)
+    }
+}
