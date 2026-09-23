@@ -20,6 +20,20 @@ public struct NativeChargeLimit: Codable, Equatable, Sendable {
         guard let client = PowerUIClient() else { return nil }
         return client.read()
     }
+
+    public enum SetError: Error, Equatable, Sendable {
+        case unavailable
+        case outOfRange(Int)
+        case rejected(code: Int)
+    }
+
+    /// Sets the macOS limit. 100 switches it off. Must run as the logged-in
+    /// user; macOS accepts any whole number from 80 to 100.
+    public static func set(_ percent: Int) throws(SetError) {
+        guard (NativeLimitRange.minimum...100).contains(percent) else { throw .outOfRange(percent) }
+        guard let client = PowerUIClient() else { throw .unavailable }
+        try client.setLimit(UInt8(percent))
+    }
 }
 
 /// Thin, signature-checked wrapper around `PowerUISmartChargeClient`.
@@ -57,6 +71,17 @@ struct PowerUIClient {
 
         guard error == nil, let enabled, let limit else { return nil }
         return NativeChargeLimit(enabled: enabled != 0, limit: Int(limit), available: available)
+    }
+
+    func setLimit(_ percent: UInt8) throws(NativeChargeLimit.SetError) {
+        typealias Setter = @convention(c) (NSObject, Selector, UInt8, AutoreleasingUnsafeMutablePointer<NSError?>) -> Bool
+        guard let (setter, selector) = call("setMCLLimit:error:", "B28@0:8C16^@20", as: Setter.self) else {
+            throw .unavailable
+        }
+        var error: NSError?
+        guard setter(object, selector, percent, &error) else { throw .rejected(code: error?.code ?? -1) }
+        // Confirm macOS kept it, the same way SMC writes are read back.
+        guard read()?.limit == Int(percent) else { throw .rejected(code: -1) }
     }
 
     /// Looks up `name`, checks its type encoding, and returns its implementation
