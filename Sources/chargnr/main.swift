@@ -16,6 +16,10 @@ let usage = """
       discharge PERCENT  run from battery while plugged in down to PERCENT (10–99)
       discharge cancel   stop discharging
       led MODE           MagSafe LED: status (green at the limit), off, or system
+      calibrate [--to N] [--hold MIN]
+                         discharge to N% (15), charge to 100%, hold MIN (60), resume limit
+      calibrate cancel | skip
+      schedule DAYS [--hour H]  calibrate every DAYS (7–90) from hour H (3); schedule off
       install            install the background helper (needs sudo)
       uninstall          remove the helper and restore normal charging (needs sudo)
       keys [--all|KEY…]  raw values of the SMC keys chargnr uses (--all: every key)
@@ -49,6 +53,9 @@ struct Options {
     var keys: [SMCKey] = []
     var seconds: Int?
     var gap: Int?
+    var to: Int?
+    var hold: Int?
+    var hour: Int?
 
     init(_ args: ArraySlice<String>) {
         var args = args
@@ -61,6 +68,9 @@ struct Options {
                     fail("--gap needs a number from \(ChargeConfig.gapRange.lowerBound) to \(ChargeConfig.gapRange.upperBound)")
                 }
                 gap = value
+            case "--to", "--hold", "--hour":
+                guard let value = args.popFirst().flatMap(Int.init) else { fail("\(arg) needs a number") }
+                if arg == "--to" { to = value } else if arg == "--hold" { hold = value } else { hour = value }
             case "--for":
                 guard let value = args.popFirst().flatMap(Int.init), (1...3600).contains(value) else {
                     fail("--for needs a number of seconds from 1 to 3600")
@@ -186,6 +196,18 @@ case "status":
                 print("Top up".padding(toLength: 18, withPad: " ", startingAt: 0)
                       + "charging to 100% (ends when full, on unplug, or at \(until.formatted(date: .omitted, time: .shortened)))")
             }
+            if let run = helper.calibration {
+                let step = switch run.step {
+                case .discharge: "discharging to \(run.dischargeTo)%"
+                case .charge: "charging to 100%"
+                case .hold: "holding at 100% for \(run.holdMinutes) min"
+                }
+                print("Calibration".padding(toLength: 18, withPad: " ", startingAt: 0) + "step: \(step)")
+            }
+            if let next = helper.nextCalibration {
+                print("Next calibration".padding(toLength: 18, withPad: " ", startingAt: 0)
+                      + next.formatted(date: .abbreviated, time: .shortened))
+            }
             if let target = helper.dischargeTo {
                 print("Discharge".padding(toLength: 18, withPad: " ", startingAt: 0) + "running on battery down to \(target)%")
             }
@@ -292,7 +314,10 @@ case "topup":
     let until = Date().addingTimeInterval(ChargeConfig.topUpMaximum)
     let outcome = await updateConfig(options, requireHelper: !cancel) {
         $0.topUpUntil = cancel ? nil : until
-        if !cancel { $0.dischargeTo = nil }
+        if !cancel {
+            $0.dischargeTo = nil
+            $0.calibration = nil
+        }
     }
     if cancel {
         print("Top up cancelled; back to the \(outcome.config.limit)% limit.")
@@ -319,7 +344,10 @@ case "discharge":
     }
     let outcome = await updateConfig(options, requireHelper: target != nil) {
         $0.dischargeTo = target
-        if target != nil { $0.topUpUntil = nil }
+        if target != nil {
+            $0.topUpUntil = nil
+            $0.calibration = nil
+        }
     }
     if let target = outcome.config.dischargeTo {
         print("Discharging to \(target)% while plugged in. The Mac stays awake until then; sleep pauses it.")
@@ -339,6 +367,56 @@ case "led":
     case .status: print("MagSafe LED: orange while charging, green when the limit holds or the battery is full.")
     case .off: print("MagSafe LED off while plugged in.")
     case .system: print("MagSafe LED back to macOS.")
+    }
+case "calibrate":
+    let action = args.first.map { ["start", "cancel", "skip"].contains($0) ? args.removeFirst() : "start" } ?? "start"
+    let options = Options(args)
+    let caps = Capabilities.detect(options.transport())
+    switch action {
+    case "start":
+        guard caps.canDisableAdapter else { fail("calibration needs to discharge while plugged in, which this Mac cannot do") }
+        let run = Calibration(dischargeTo: options.to ?? Calibration.defaultDischargeTo,
+                              holdMinutes: options.hold ?? Calibration.defaultHoldMinutes, startedAt: Date())
+        _ = await updateConfig(options, requireHelper: true) {
+            $0.calibration = run
+            $0.topUpUntil = nil
+            $0.dischargeTo = nil
+        }
+        print("""
+            Calibration started:
+              1. discharge to \(run.dischargeTo)% (running on battery; the Mac stays awake)
+              2. charge to 100%
+              3. hold at 100% for \(run.holdMinutes) min
+              4. back to your limit
+            Keep the charger connected. Cancel with: chargnr calibrate cancel
+            """)
+    case "cancel":
+        _ = await updateConfig(options, requireHelper: true) { $0.calibration = nil }
+        print("Calibration cancelled.")
+    default:
+        _ = await updateConfig(options, requireHelper: true) { $0.lastCalibration = Date() }
+        print("Next scheduled calibration skipped; the schedule counts from now.")
+    }
+case "schedule":
+    guard let value = args.popFirst() else { fail("usage: chargnr schedule DAYS [--hour H] | off") }
+    let options = Options(args)
+    let schedule: CalibrationSchedule?
+    if value == "off" { schedule = nil } else {
+        guard let days = Int(value), CalibrationSchedule.everyDaysRange.contains(days) else {
+            fail("schedule must be \(CalibrationSchedule.everyDaysRange.lowerBound)–\(CalibrationSchedule.everyDaysRange.upperBound) days or off")
+        }
+        guard (0...23).contains(options.hour ?? 3) else { fail("--hour must be 0–23") }
+        schedule = CalibrationSchedule(everyDays: days, hour: options.hour ?? 3)
+    }
+    let outcome = await updateConfig(options, requireHelper: schedule != nil) {
+        $0.schedule = schedule
+        if schedule != nil, $0.lastCalibration == nil { $0.lastCalibration = Date() }
+    }
+    if let schedule, let last = outcome.config.lastCalibration {
+        let next = schedule.nextRun(after: last)
+        print("Calibration every \(schedule.everyDays) days. Next: \(next.formatted(date: .abbreviated, time: .shortened)), once the charger is connected.")
+    } else {
+        print("Calibration schedule off.")
     }
 case "install":
     // Next to the CLI: .build/release, Homebrew, or chargnr.app/Contents/MacOS.

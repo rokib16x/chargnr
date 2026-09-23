@@ -29,10 +29,10 @@ let controller = Controller(actuator: Actuator(smc: smc, caps: caps),
                             readBattery: { BatteryReading.read(smc) })
 // Best effort: macOS's own limit belongs to the user, so this may be refused
 // for root. The app and CLI re-sync it too.
-controller.onTopUpEnded = { config in
+controller.onNativeTargetChanged = { target in
     guard caps.charging == .gated || caps.charging == .unsupported else { return }
-    do { try NativeChargeLimit.set(config.nativeTarget()) } catch {
-        log.notice("could not restore macOS limit after top up: \(String(describing: error), privacy: .public)")
+    do { try NativeChargeLimit.set(target) } catch {
+        log.notice("could not set macOS limit to \(target, privacy: .public)%: \(String(describing: error), privacy: .public)")
     }
 }
 

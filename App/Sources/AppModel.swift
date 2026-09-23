@@ -11,6 +11,7 @@ enum Phase: Equatable {
     case toppingUp
     case discharging(to: Int)
     case heatPause(Double)
+    case calibrating(Calibration.Step)
 }
 
 /// Where the helper stands, for the install banner.
@@ -61,6 +62,7 @@ final class AppModel {
 
     var phase: Phase {
         guard let battery else { return .notCharging }
+        if let run = helper?.calibration { return .calibrating(run.step) }
         if let target = helper?.dischargeTo { return .discharging(to: target) }
         if helper?.heatHold == true, let t = temperatureC { return .heatPause(t) }
         if helper?.topUpUntil != nil { return .toppingUp }
@@ -114,14 +116,38 @@ final class AppModel {
         let until = Date().addingTimeInterval(ChargeConfig.topUpMaximum)
         await change(requireHelper: on) {
             $0.topUpUntil = on ? until : nil
-            if on { $0.dischargeTo = nil }
+            if on {
+                $0.dischargeTo = nil
+                $0.calibration = nil
+            }
         }
     }
 
     func discharge(to target: Int?) async {
         await change(requireHelper: target != nil) {
             $0.dischargeTo = target
-            if target != nil { $0.topUpUntil = nil }
+            if target != nil {
+                $0.topUpUntil = nil
+                $0.calibration = nil
+            }
+        }
+    }
+
+    func calibrate(_ on: Bool) async {
+        let run = Calibration(startedAt: Date())
+        await change(requireHelper: true) {
+            $0.calibration = on ? run : nil
+            if on {
+                $0.topUpUntil = nil
+                $0.dischargeTo = nil
+            }
+        }
+    }
+
+    func setSchedule(everyDays days: Int?) async {
+        await change(requireHelper: days != nil) {
+            $0.schedule = days.map { CalibrationSchedule(everyDays: $0, hour: 3) }
+            if days != nil, $0.lastCalibration == nil { $0.lastCalibration = Date() }
         }
     }
 

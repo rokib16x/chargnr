@@ -31,6 +31,8 @@ final class Notifier {
             post(.notifyHeat, "Battery is hot", String(format: "Charging paused at %.0f °C until it cools down.", t))
         case (.toppingUp, let to) where !isToppingUp(to):
             post(.notifyTopUp, "Top up finished", "Back to the \(model.config.limit)% limit.")
+        case (.calibrating, let to) where !isCalibrating(to):
+            post(.notifyDischarge, "Calibration finished", "Back to the \(model.config.limit)% limit.")
         case (.discharging(let target), let to) where !isDischarging(to):
             post(.notifyDischarge, "Discharge finished", "The battery is down to \(target)%; power is back on.")
         default:
@@ -45,6 +47,7 @@ final class Notifier {
     private func isHeatPause(_ phase: Phase) -> Bool { if case .heatPause = phase { true } else { false } }
     private func isToppingUp(_ phase: Phase) -> Bool { phase == .toppingUp }
     private func isDischarging(_ phase: Phase) -> Bool { if case .discharging = phase { true } else { false } }
+    private func isCalibrating(_ phase: Phase) -> Bool { if case .calibrating = phase { true } else { false } }
 
     private func post(_ key: Preferences.Key, _ title: String, _ body: String) {
         guard Preferences.bool(key), authorized else { return }

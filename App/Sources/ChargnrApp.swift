@@ -67,7 +67,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let symbol: String = switch model.phase {
         case .charging, .toppingUp: "battery.100percent.bolt"
         case .heatPause: "thermometer.high"
-        case .discharging: "arrow.down.circle"
+        case .discharging, .calibrating(.discharge): "arrow.down.circle"
+        case .calibrating: "battery.100percent.bolt"
         default: "battery.\(percent >= 88 ? 100 : percent >= 63 ? 75 : percent >= 38 ? 50 : percent >= 13 ? 25 : 0)percent"
         }
         let text = Preferences.bool(.showPercent) && model.battery != nil ? " \(percent)%" : ""

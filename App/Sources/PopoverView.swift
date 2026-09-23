@@ -52,6 +52,9 @@ struct PopoverView: View {
         case .toppingUp: "Topping up to 100%"
         case .discharging(let target): "Discharging to \(target)%"
         case .heatPause(let t): String(format: "Paused: battery at %.0f °C", t)
+        case .calibrating(.discharge): "Calibrating: discharging to \(model.helper?.calibration?.dischargeTo ?? 15)%"
+        case .calibrating(.charge): "Calibrating: charging to 100%"
+        case .calibrating(.hold): "Calibrating: holding at 100%"
         }
     }
 
@@ -117,14 +120,19 @@ struct PopoverView: View {
                 Spacer()
                 if case .discharging = model.phase {
                     Button("Stop Discharge") { Task { await model.discharge(to: nil) } }
+                } else if case .calibrating = model.phase {
+                    Button("Stop Calibration") { Task { await model.calibrate(false) } }
                 } else {
                     Menu("Discharge") {
                         ForEach(dischargeTargets, id: \.self) { target in
                             Button("To \(target)%") { Task { await model.discharge(to: target) } }
                         }
+                        Divider()
+                        Button("Calibrate Battery…") { Task { await model.calibrate(true) } }
+                            .help("Discharge to 15%, charge to 100%, hold for an hour, then back to your limit")
                     }
                     .fixedSize()
-                    .disabled(!running || !model.caps.canDisableAdapter || dischargeTargets.isEmpty)
+                    .disabled(!running || !model.caps.canDisableAdapter)
                 }
             }
             HStack {

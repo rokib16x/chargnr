@@ -29,8 +29,30 @@ struct SettingsView: View {
                 notifyToggle(.notifyLimit, "Charge limit reached")
                 notifyToggle(.notifyHeat, "Charging paused because the battery is hot")
                 notifyToggle(.notifyTopUp, "Top up finished")
-                notifyToggle(.notifyDischarge, "Discharge finished")
+                notifyToggle(.notifyDischarge, "Discharge or calibration finished")
                 notifyToggle(.notifyHelper, "Helper stopped")
+            }
+
+            if model.caps.canDisableAdapter {
+                Section("Calibration") {
+                    Picker("Calibrate automatically", selection: Binding(
+                        get: { model.config.schedule?.everyDays ?? 0 },
+                        set: { days in Task { await model.setSchedule(everyDays: days == 0 ? nil : days) } })) {
+                        Text("Never").tag(0)
+                        Text("Every 30 days").tag(30)
+                        Text("Every 60 days").tag(60)
+                        Text("Every 90 days").tag(90)
+                    }
+                    .disabled(model.helperState != .running)
+                    if let next = model.helper?.nextCalibration {
+                        LabeledContent("Next run", value: next.formatted(date: .abbreviated, time: .shortened))
+                    }
+                    if let last = model.config.lastCalibration {
+                        LabeledContent("Last run", value: last.formatted(date: .abbreviated, time: .omitted))
+                    }
+                    Text("Discharges to 15%, charges to 100% and holds for an hour so the battery gauge can re-learn its capacity. Keep the charger connected.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
 
             if model.caps.magSafeLED {

@@ -39,6 +39,8 @@ public struct HelperStatus: Codable, Equatable, Sendable {
     public var heatHold: Bool?
     public var topUpUntil: Date?
     public var dischargeTo: Int?
+    public var calibration: Calibration?
+    public var nextCalibration: Date?
     public var lastError: String?
     /// Seconds until the next scheduled check.
     public var nextCheck: Int
@@ -100,13 +102,18 @@ public final class Controller: @unchecked Sendable {
     public func tick() -> TimeInterval {
         reading = readBattery()
         if let reading {
+            let nativeBefore = config.nativeTarget(at: now())
             endTopUpIfDone(reading)
             endDischargeIfDone(reading)
+            advanceCalibration(reading)
+            startScheduledCalibration(reading)
+            let nativeAfter = config.nativeTarget(at: now())
+            if nativeAfter != nativeBefore { onNativeTargetChanged?(nativeAfter) }
             updateHeat(reading.temperatureC)
             let effective = config.effective(at: now())
             var next = ChargePolicy.decide(PolicyInput(
                 config: effective, method: method, percent: reading.percent, pluggedIn: reading.pluggedIn,
-                hot: hotSince != nil, discharging: config.dischargeTo != nil, canInhibit: actuator.caps.canInhibit,
+                hot: hotSince != nil, discharging: config.dischargeTo != nil || config.calibration?.step == .discharge, canInhibit: actuator.caps.canInhibit,
                 canCutAdapter: actuator.caps.canDisableAdapter, previous: output))
             if ledRefused == nil {
                 let charging = reading.isCharging
@@ -135,7 +142,6 @@ public final class Controller: @unchecked Sendable {
         try? configFile.save(ended)
         config = ended
         log.notice("top up ended: \(reason, privacy: .public)")
-        onTopUpEnded?(ended)
     }
 
     private func endDischargeIfDone(_ reading: BatteryReading) {
@@ -147,14 +153,62 @@ public final class Controller: @unchecked Sendable {
         log.notice("discharge finished at \(reading.percent, privacy: .public)%")
     }
 
-    /// True while a force discharge is running, so the helper can keep the Mac
-    /// awake: asleep, the adapter has to be back on and nothing drains.
+    /// True while a force discharge (or calibration's discharge step) is
+    /// running, so the helper can keep the Mac awake: asleep, the adapter has
+    /// to be back on and nothing drains.
     public var isDischarging: Bool {
-        config.dischargeTo != nil && !output.adapterOn
+        (config.dischargeTo != nil || config.calibration?.step == .discharge) && !output.adapterOn
     }
 
-    /// Called when a top up ends, so the helper can put macOS's own limit back.
-    public var onTopUpEnded: (@Sendable (ChargeConfig) -> Void)?
+    /// Called with the new value whenever macOS's own limit should change
+    /// (top up or calibration starting or ending), so the helper can set it.
+    public var onNativeTargetChanged: (@Sendable (Int) -> Void)?
+
+    private func save(_ change: (inout ChargeConfig) -> Void) {
+        var next = config
+        change(&next)
+        try? configFile.save(next)
+        config = next
+    }
+
+    private func advanceCalibration(_ reading: BatteryReading) {
+        guard let run = config.calibration else { return }
+        // Without an adapter switch the discharge step can only wait for use.
+        switch run.advance(percent: reading.percent, at: now()) {
+        case .stay:
+            break
+        case .moveTo(let next):
+            save { $0.calibration = next }
+            log.notice("calibration: \(next.step.rawValue, privacy: .public) at \(reading.percent, privacy: .public)%")
+        case .finished:
+            save {
+                $0.calibration = nil
+                $0.lastCalibration = now()
+            }
+            log.notice("calibration finished")
+        case .abandoned:
+            save { $0.calibration = nil }
+            log.error("calibration abandoned after 24 hours")
+        }
+    }
+
+    private func startScheduledCalibration(_ reading: BatteryReading) {
+        guard let schedule = config.schedule, config.calibration == nil, reading.pluggedIn else { return }
+        let last = config.lastCalibration ?? now()
+        if config.lastCalibration == nil { save { $0.lastCalibration = last } }
+        guard now() >= schedule.nextRun(after: last) else { return }
+        startCalibration(Calibration(startedAt: now()))
+        log.notice("scheduled calibration started")
+    }
+
+    /// Starts a run, replacing any top up or discharge.
+    public func startCalibration(_ run: Calibration) {
+        save {
+            $0.calibration = run
+            $0.topUpUntil = nil
+            $0.dischargeTo = nil
+        }
+    }
 
     /// Starts holding at the heat limit; stops only once the battery has
     /// cooled a little and the cooldown has passed, so it does not flap.
@@ -219,6 +273,8 @@ public final class Controller: @unchecked Sendable {
                      percent: reading?.percent, pluggedIn: reading?.pluggedIn,
                      temperatureC: reading?.temperatureC, heatHold: config.heatLimit == nil ? nil : hotSince != nil,
                      topUpUntil: config.topUpUntil, dischargeTo: config.dischargeTo,
+                     calibration: config.calibration,
+                     nextCalibration: config.schedule.map { $0.nextRun(after: config.lastCalibration ?? now()) },
                      lastError: lastError,
                      nextCheck: Int(interval))
     }
@@ -229,7 +285,7 @@ public final class Controller: @unchecked Sendable {
     public var interval: TimeInterval {
         guard let reading else { return 300 }
         if output != .normal { return 20 }
-        if config.topUpUntil != nil { return 60 }
+        if config.topUpUntil != nil || config.calibration != nil { return 60 }
         // Temperature can climb within minutes while charging.
         if config.heatLimit != nil, reading.pluggedIn { return 60 }
         guard method != .none else { return 300 }

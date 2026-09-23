@@ -34,14 +34,29 @@ public struct ChargeConfig: Codable, Equatable, Sendable {
 
     public var led: LEDMode
 
+    /// A calibration run in progress.
+    public var calibration: Calibration?
+    public var schedule: CalibrationSchedule?
+    /// When the last calibration finished (or scheduling began), for the schedule.
+    public var lastCalibration: Date?
+
     public init(limit: Int = 100, gap: Int = ChargeConfig.defaultGap, heatLimit: Int? = nil,
-                topUpUntil: Date? = nil, dischargeTo: Int? = nil, led: LEDMode = .system) {
+                topUpUntil: Date? = nil, dischargeTo: Int? = nil, led: LEDMode = .system,
+                calibration: Calibration? = nil, schedule: CalibrationSchedule? = nil, lastCalibration: Date? = nil) {
         self.limit = limit
         self.gap = gap
         self.heatLimit = heatLimit
         self.topUpUntil = topUpUntil
         self.dischargeTo = dischargeTo
         self.led = led
+        self.calibration = calibration
+        self.schedule = schedule
+        self.lastCalibration = lastCalibration
+    }
+
+    /// Calibration's charge and hold steps need the battery to reach 100%.
+    public var calibrationNeedsFull: Bool {
+        calibration.map { $0.step != .discharge } ?? false
     }
 
     public static let dischargeRange = 10...99
@@ -54,9 +69,10 @@ public struct ChargeConfig: Codable, Equatable, Sendable {
         topUpUntil.map { date < $0 } ?? false
     }
 
-    /// The config the policy should follow right now: no limit while topping up.
+    /// The config the policy should follow right now: no limit while topping
+    /// up or while calibration charges and holds at full.
     public func effective(at date: Date = Date()) -> ChargeConfig {
-        guard isToppingUp(at: date) else { return self }
+        guard isToppingUp(at: date) || calibrationNeedsFull else { return self }
         var copy = self
         copy.limit = 100
         return copy
@@ -106,10 +122,11 @@ public struct ChargeConfig: Codable, Equatable, Sendable {
             || (isToppingUp() && isLimited)
             || dischargeTo != nil
             || (led != .system && caps.magSafeLED)
+            || calibration != nil || schedule != nil
     }
 
     enum CodingKeys: String, CodingKey {
-        case limit, gap, heatLimit, topUpUntil, dischargeTo, led
+        case limit, gap, heatLimit, topUpUntil, dischargeTo, led, calibration, schedule, lastCalibration
     }
 
     public init(from decoder: any Decoder) throws {
@@ -121,5 +138,8 @@ public struct ChargeConfig: Codable, Equatable, Sendable {
         topUpUntil = try c.decodeIfPresent(Date.self, forKey: .topUpUntil)
         dischargeTo = try c.decodeIfPresent(Int.self, forKey: .dischargeTo)
         led = (try? c.decodeIfPresent(LEDMode.self, forKey: .led)) ?? .system
+        calibration = try? c.decodeIfPresent(Calibration.self, forKey: .calibration)
+        schedule = try? c.decodeIfPresent(CalibrationSchedule.self, forKey: .schedule)
+        lastCalibration = try c.decodeIfPresent(Date.self, forKey: .lastCalibration)
     }
 }

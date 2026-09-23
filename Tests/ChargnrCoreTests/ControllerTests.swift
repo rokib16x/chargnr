@@ -274,11 +274,11 @@ final class FakeClock: Sendable {
     @Test func tellsHelperToRestoreMacOSLimit() throws {
         let clock = FakeClock()
         let (_, battery, controller, _) = try rig(.gated, config: ChargeConfig(limit: 85, topUpUntil: clock.now.addingTimeInterval(3600)), clock: clock)
-        let ended = OSAllocatedUnfairLock<ChargeConfig?>(initialState: nil)
-        controller.onTopUpEnded = { config in ended.withLock { $0 = config } }
+        let target = OSAllocatedUnfairLock<Int?>(initialState: nil)
+        controller.onNativeTargetChanged = { value in target.withLock { $0 = value } }
         battery.reading = BatteryReading(percent: 100, pluggedIn: true)
         controller.start()
-        #expect(ended.withLock { $0 }?.nativeTarget() == 85)
+        #expect(target.withLock { $0 } == 85)
     }
 
     @Test func heatStillWinsDuringTopUp() throws {
@@ -466,5 +466,117 @@ extension Logger {
         #expect(rig.controller.status().lastError == nil)
         rig.set(61)
         #expect(rig.controller.status().lastError == nil)
+    }
+}
+
+@Suite struct CalibrationTests {
+    func rig(config: ChargeConfig, clock: FakeClock, profile: FakeSMC.Profile = .gated)
+        throws -> (FakeSMC, FakeBattery, Controller, OSAllocatedUnfairLock<[Int]>) {
+        let smc = FakeSMC(profile: profile)
+        let battery = FakeBattery()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let file = JSONFile<ChargeConfig>(dir.appendingPathComponent("c.json"))
+        try file.save(config)
+        let controller = Controller(actuator: Actuator(smc: smc, caps: Capabilities.detect(smc)), configFile: file,
+                                    marker: JSONFile(dir.appendingPathComponent("m.json")), now: { clock.now },
+                                    log: .quiet, readBattery: { battery.reading })
+        let targets = OSAllocatedUnfairLock<[Int]>(initialState: [])
+        controller.onNativeTargetChanged = { value in targets.withLock { $0.append(value) } }
+        return (smc, battery, controller, targets)
+    }
+
+    @Test func runsAllStepsAndReturnsToLimit() throws {
+        let clock = FakeClock()
+        let (smc, battery, controller, targets) = try rig(
+            config: ChargeConfig(limit: 85, calibration: Calibration(dischargeTo: 15, holdMinutes: 60, startedAt: clock.now)),
+            clock: clock)
+        battery.reading = BatteryReading(percent: 60, pluggedIn: true)
+        controller.start()
+        #expect(try smc.read("CHIE") == [0x08], "discharging")
+        #expect(controller.isDischarging)
+
+        battery.reading = BatteryReading(percent: 15, pluggedIn: true)
+        controller.tick()
+        #expect(controller.config.calibration?.step == .charge)
+        #expect(try smc.read("CHIE") == [0x00], "charging again")
+        #expect(targets.withLock { $0 } == [100], "macOS limit lifted for the full charge")
+
+        battery.reading.percent = 100
+        clock.advance(3 * 3600)
+        controller.tick()
+        #expect(controller.config.calibration?.step == .hold)
+
+        clock.advance(59 * 60)
+        controller.tick()
+        #expect(controller.config.calibration?.step == .hold)
+        clock.advance(60)
+        controller.tick()
+        #expect(controller.config.calibration == nil)
+        #expect(controller.config.lastCalibration == clock.now)
+        #expect(targets.withLock { $0 } == [100, 85], "limit back")
+    }
+
+    @Test func abandonsAfterTimeout() throws {
+        let clock = FakeClock()
+        let (_, battery, controller, _) = try rig(
+            config: ChargeConfig(calibration: Calibration(startedAt: clock.now)), clock: clock)
+        battery.reading = BatteryReading(percent: 60, pluggedIn: false)
+        controller.start()
+        clock.advance(Calibration.timeout + 1)
+        controller.tick()
+        #expect(controller.config.calibration == nil)
+        #expect(controller.config.lastCalibration == nil, "not counted as done")
+    }
+
+    @Test func scheduleStartsWhenDueAndPluggedIn() throws {
+        let clock = FakeClock()
+        let last = clock.now
+        let (_, battery, controller, _) = try rig(
+            config: ChargeConfig(schedule: CalibrationSchedule(everyDays: 7, hour: 0), lastCalibration: last), clock: clock)
+        battery.reading = BatteryReading(percent: 80, pluggedIn: true)
+        controller.start()
+        #expect(controller.config.calibration == nil)
+
+        clock.advance(8 * 24 * 3600)
+        battery.reading.pluggedIn = false
+        controller.tick()
+        #expect(controller.config.calibration == nil, "waits for the charger")
+        battery.reading.pluggedIn = true
+        controller.tick()
+        #expect(controller.config.calibration?.step == .discharge)
+    }
+
+    @Test func scheduleWithoutHistoryStartsCountingNow() throws {
+        let clock = FakeClock()
+        let (_, battery, controller, _) = try rig(config: ChargeConfig(schedule: CalibrationSchedule(everyDays: 30, hour: 3)), clock: clock)
+        battery.reading = BatteryReading(percent: 80, pluggedIn: true)
+        controller.start()
+        #expect(controller.config.calibration == nil)
+        #expect(controller.config.lastCalibration == clock.now)
+    }
+
+    @Test func calibrationReplacesTopUpAndDischarge() throws {
+        let clock = FakeClock()
+        let (_, battery, controller, _) = try rig(config: ChargeConfig(topUpUntil: clock.now.addingTimeInterval(600), dischargeTo: 50), clock: clock)
+        battery.reading = BatteryReading(percent: 80, pluggedIn: true)
+        controller.startCalibration(Calibration(startedAt: clock.now))
+        #expect(controller.config.topUpUntil == nil)
+        #expect(controller.config.dischargeTo == nil)
+    }
+
+    @Test func nextRunIsAtTheScheduledHour() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let last = Date(timeIntervalSince1970: 1_700_000_000) // 2023-11-14 22:13 UTC
+        let next = CalibrationSchedule(everyDays: 7, hour: 3).nextRun(after: last, calendar: calendar)
+        #expect(calendar.component(.hour, from: next) == 3)
+        #expect(calendar.component(.day, from: next) == 21)
+    }
+
+    @Test func clampsValues() {
+        let run = Calibration(dischargeTo: 2, holdMinutes: 999, startedAt: Date())
+        #expect(run.dischargeTo == 10)
+        #expect(run.holdMinutes == 240)
+        #expect(CalibrationSchedule(everyDays: 1, hour: 30) == CalibrationSchedule(everyDays: 7, hour: 23))
     }
 }
