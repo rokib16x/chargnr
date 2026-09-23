@@ -34,6 +34,7 @@ public struct HelperStatus: Codable, Equatable, Sendable {
     /// Heat protection is pausing charging right now.
     public var heatHold: Bool?
     public var topUpUntil: Date?
+    public var dischargeTo: Int?
     public var lastError: String?
     /// Seconds until the next scheduled check.
     public var nextCheck: Int
@@ -92,10 +93,11 @@ public final class Controller: @unchecked Sendable {
         reading = readBattery()
         if let reading {
             endTopUpIfDone(reading)
+            endDischargeIfDone(reading)
             updateHeat(reading.temperatureC)
             let next = ChargePolicy.decide(PolicyInput(
                 config: config.effective(at: now()), method: method, percent: reading.percent, pluggedIn: reading.pluggedIn,
-                hot: hotSince != nil, canInhibit: actuator.caps.canInhibit,
+                hot: hotSince != nil, discharging: config.dischargeTo != nil, canInhibit: actuator.caps.canInhibit,
                 canCutAdapter: actuator.caps.canDisableAdapter, previous: output))
             apply(next)
         }
@@ -119,6 +121,21 @@ public final class Controller: @unchecked Sendable {
         config = ended
         log.notice("top up ended: \(reason)")
         onTopUpEnded?(ended)
+    }
+
+    private func endDischargeIfDone(_ reading: BatteryReading) {
+        guard let target = config.dischargeTo, reading.percent <= target || !actuator.caps.canDisableAdapter else { return }
+        var ended = config
+        ended.dischargeTo = nil
+        try? configFile.save(ended)
+        config = ended
+        log.notice("discharge finished at \(reading.percent)%")
+    }
+
+    /// True while a force discharge is running, so the helper can keep the Mac
+    /// awake: asleep, the adapter has to be back on and nothing drains.
+    public var isDischarging: Bool {
+        config.dischargeTo != nil && !output.adapterOn
     }
 
     /// Called when a top up ends, so the helper can put macOS's own limit back.
@@ -183,7 +200,7 @@ public final class Controller: @unchecked Sendable {
         HelperStatus(version: Chargnr.version, config: config, method: method, output: output,
                      percent: reading?.percent, pluggedIn: reading?.pluggedIn,
                      temperatureC: reading?.temperatureC, heatHold: config.heatLimit == nil ? nil : hotSince != nil,
-                     topUpUntil: config.topUpUntil,
+                     topUpUntil: config.topUpUntil, dischargeTo: config.dischargeTo,
                      lastError: lastError,
                      nextCheck: Int(interval))
     }

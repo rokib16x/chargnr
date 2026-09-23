@@ -19,13 +19,20 @@ public struct ChargeConfig: Codable, Equatable, Sendable {
     /// when the battery is full or the charger is unplugged.
     public var topUpUntil: Date?
 
+    /// Run from battery while plugged in until the battery is down to this
+    /// percentage, then clear. nil when not discharging.
+    public var dischargeTo: Int?
+
     public init(limit: Int = 100, gap: Int = ChargeConfig.defaultGap, heatLimit: Int? = nil,
-                topUpUntil: Date? = nil) {
+                topUpUntil: Date? = nil, dischargeTo: Int? = nil) {
         self.limit = limit
         self.gap = gap
         self.heatLimit = heatLimit
         self.topUpUntil = topUpUntil
+        self.dischargeTo = dischargeTo
     }
+
+    public static let dischargeRange = 10...99
 
     /// A top up gives up after this long, so a forgotten one cannot keep the
     /// battery at 100% for days.
@@ -70,6 +77,7 @@ public struct ChargeConfig: Codable, Equatable, Sendable {
         var copy = self
         copy.limit = min(max(limit, Self.limitRange.lowerBound), Self.limitRange.upperBound)
         copy.gap = min(max(gap, Self.gapRange.lowerBound), Self.gapRange.upperBound)
+        copy.dischargeTo = dischargeTo.map { min(max($0, Self.dischargeRange.lowerBound), Self.dischargeRange.upperBound) }
         copy.heatLimit = heatLimit.map { min(max($0, Self.heatLimitRange.lowerBound), Self.heatLimitRange.upperBound) }
         return copy
     }
@@ -84,10 +92,11 @@ public struct ChargeConfig: Codable, Equatable, Sendable {
             || (heatLimit != nil && (caps.canInhibit || caps.canDisableAdapter))
             // The helper ends a top up; without it macOS would stay at 100%.
             || (isToppingUp() && isLimited)
+            || dischargeTo != nil
     }
 
     enum CodingKeys: String, CodingKey {
-        case limit, gap, heatLimit, topUpUntil
+        case limit, gap, heatLimit, topUpUntil, dischargeTo
     }
 
     public init(from decoder: any Decoder) throws {
@@ -97,5 +106,6 @@ public struct ChargeConfig: Codable, Equatable, Sendable {
         gap = try c.decodeIfPresent(Int.self, forKey: .gap) ?? defaults.gap
         heatLimit = try c.decodeIfPresent(Int.self, forKey: .heatLimit)
         topUpUntil = try c.decodeIfPresent(Date.self, forKey: .topUpUntil)
+        dischargeTo = try c.decodeIfPresent(Int.self, forKey: .dischargeTo)
     }
 }

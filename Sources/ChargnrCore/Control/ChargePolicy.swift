@@ -51,17 +51,21 @@ public struct PolicyInput: Sendable {
     public var pluggedIn: Bool
     /// Heat protection is holding (the controller handles hysteresis and cooldown).
     public var hot: Bool = false
+    /// Force discharge is active and the battery is still above its target.
+    public var discharging: Bool = false
     public var canInhibit: Bool
     public var canCutAdapter: Bool
     public var previous: ChargeOutput
 
     public init(config: ChargeConfig, method: ControlMethod, percent: Int, pluggedIn: Bool,
-                hot: Bool = false, canInhibit: Bool, canCutAdapter: Bool, previous: ChargeOutput) {
+                hot: Bool = false, discharging: Bool = false,
+                canInhibit: Bool, canCutAdapter: Bool, previous: ChargeOutput) {
         self.config = config
         self.method = method
         self.percent = percent
         self.pluggedIn = pluggedIn
         self.hot = hot
+        self.discharging = discharging
         self.canInhibit = canInhibit
         self.canCutAdapter = canCutAdapter
         self.previous = previous
@@ -70,9 +74,12 @@ public struct PolicyInput: Sendable {
 
 /// The charging decision, as a pure function so it can be tested without hardware.
 public enum ChargePolicy {
-    /// Combines the limit with heat protection. Heat wins: it only ever
-    /// switches things off, never back on.
+    /// Force discharge wins over everything; then heat, which only ever
+    /// switches things off; then the limit.
     public static func decide(_ input: PolicyInput) -> ChargeOutput {
+        if input.discharging && input.canCutAdapter {
+            return ChargeOutput(chargingAllowed: true, adapterOn: false)
+        }
         var output = decide(config: input.config, method: input.method, percent: input.percent,
                             pluggedIn: input.pluggedIn, previous: input.previous)
         if input.hot && (input.pluggedIn || !input.previous.adapterOn) {

@@ -39,7 +39,19 @@ controller.onTopUpEnded = { config in
 // MARK: - Loop
 
 let timer = DispatchSource.makeTimerSource(queue: queue)
+/// Held while force discharging so idle sleep does not pause it.
+nonisolated(unsafe) var awakeAssertion: IOPMAssertionID = 0
+
 @Sendable func schedule(_ seconds: TimeInterval) {
+    // Keep the Mac awake exactly while a discharge is running.
+    if controller.isDischarging, awakeAssertion == 0 {
+        IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
+                                    IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                                    "chargnr force discharge" as CFString, &awakeAssertion)
+    } else if !controller.isDischarging, awakeAssertion != 0 {
+        IOPMAssertionRelease(awakeAssertion)
+        awakeAssertion = 0
+    }
     // Leeway lets macOS batch our wakeups with others.
     timer.schedule(deadline: .now() + seconds, leeway: .seconds(max(1, Int(seconds / 10))))
 }

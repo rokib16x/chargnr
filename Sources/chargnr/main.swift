@@ -13,6 +13,8 @@ let usage = """
                          POINTS below it (1–20, default 5); sailing off = 1
       heat CELSIUS       pause charging while the battery is this hot (30–45); heat off
       topup [cancel]     charge to 100% once, then return to the limit
+      discharge PERCENT  run from battery while plugged in down to PERCENT (10–99)
+      discharge cancel   stop discharging
       install            install the background helper (needs sudo)
       uninstall          remove the helper and restore normal charging (needs sudo)
       keys [--all|KEY…]  raw values of the SMC keys chargnr uses (--all: every key)
@@ -179,6 +181,9 @@ case "status":
                 print("Top up".padding(toLength: 18, withPad: " ", startingAt: 0)
                       + "charging to 100% (ends when full, on unplug, or at \(until.formatted(date: .omitted, time: .shortened)))")
             }
+            if let target = helper.dischargeTo {
+                print("Discharge".padding(toLength: 18, withPad: " ", startingAt: 0) + "running on battery down to \(target)%")
+            }
             if let t = helper.temperatureC, let heat = helper.config.heatLimit {
                 print("Heat protection".padding(toLength: 18, withPad: " ", startingAt: 0)
                       + String(format: "%@ (battery %.1f °C, limit %d °C)", helper.heatHold == true ? "pausing charging" : "on", t, heat))
@@ -280,13 +285,39 @@ case "topup":
     if cancel { args.removeFirst() }
     let options = Options(args)
     let until = Date().addingTimeInterval(ChargeConfig.topUpMaximum)
-    let outcome = await updateConfig(options, requireHelper: !cancel) { $0.topUpUntil = cancel ? nil : until }
+    let outcome = await updateConfig(options, requireHelper: !cancel) {
+        $0.topUpUntil = cancel ? nil : until
+        if !cancel { $0.dischargeTo = nil }
+    }
     if cancel {
         print("Top up cancelled; back to the \(outcome.config.limit)% limit.")
     } else if !outcome.config.isLimited {
         print("No limit is set, so the battery already charges to 100%.")
     } else {
         print("Charging to 100% once. The \(outcome.config.limit)% limit comes back when the battery is full, when you unplug, or after 12 hours.")
+    }
+case "discharge":
+    guard let value = args.popFirst() else { fail("usage: chargnr discharge PERCENT | cancel") }
+    let options = Options(args)
+    let target: Int?
+    if value == "cancel" { target = nil } else {
+        guard let number = Int(value.trimmingCharacters(in: CharacterSet(charactersIn: "%"))),
+              ChargeConfig.dischargeRange.contains(number) else {
+            fail("discharge target must be \(ChargeConfig.dischargeRange.lowerBound)–\(ChargeConfig.dischargeRange.upperBound)% or cancel")
+        }
+        target = number
+    }
+    if target != nil, !Capabilities.detect(options.transport()).canDisableAdapter {
+        fail("this Mac has no adapter switch, so it cannot discharge while plugged in")
+    }
+    let outcome = await updateConfig(options, requireHelper: target != nil) {
+        $0.dischargeTo = target
+        if target != nil { $0.topUpUntil = nil }
+    }
+    if let target = outcome.config.dischargeTo {
+        print("Discharging to \(target)% while plugged in. The Mac stays awake until then; sleep pauses it.")
+    } else {
+        print("Discharge stopped.")
     }
 case "install":
     let helper = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()

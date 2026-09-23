@@ -297,3 +297,51 @@ final class FakeClock: Sendable {
         #expect(ChargeConfig(limit: 60, topUpUntil: now.addingTimeInterval(60)).nativeTarget(at: now) == 100)
     }
 }
+
+@Suite struct DischargeTests {
+    @Test func runsOnBatteryDownToTargetThenClears() throws {
+        let rig = try Rig(.gated, config: ChargeConfig(limit: 100, dischargeTo: 60))
+        rig.battery.reading = BatteryReading(percent: 80, pluggedIn: true)
+        rig.controller.start()
+        #expect(try rig.smc.read("CHIE") == [0x08])
+        #expect(rig.controller.isDischarging)
+        rig.set(61, plugged: false)
+        #expect(try rig.smc.read("CHIE") == [0x08])
+        rig.set(60, plugged: false)
+        #expect(try rig.smc.read("CHIE") == [0x00])
+        #expect(rig.controller.config.dischargeTo == nil)
+        #expect(!rig.controller.isDischarging)
+    }
+
+    @Test func thenFollowsTheLimit() throws {
+        let rig = try Rig(.tahoe, config: ChargeConfig(limit: 80, dischargeTo: 50))
+        rig.controller.start()
+        rig.set(50)
+        #expect(try rig.smc.read("CHIE") == [0x00])
+        #expect(try rig.smc.read("CHTE") == [0, 0, 0, 0], "below the limit, charging resumes")
+    }
+
+    @Test func overridesHeatAndLimit() {
+        let input = PolicyInput(config: ChargeConfig(limit: 80), method: .inhibit, percent: 90, pluggedIn: true,
+                                hot: true, discharging: true, canInhibit: true, canCutAdapter: true, previous: .normal)
+        #expect(ChargePolicy.decide(input) == ChargeOutput(chargingAllowed: true, adapterOn: false))
+    }
+
+    @Test func pausesForSleep() throws {
+        let rig = try Rig(.gated, config: ChargeConfig(dischargeTo: 40))
+        rig.battery.reading = BatteryReading(percent: 70, pluggedIn: true)
+        rig.controller.start()
+        rig.controller.willSleep()
+        #expect(try rig.smc.read("CHIE") == [0x00])
+        rig.battery.reading = BatteryReading(percent: 70, pluggedIn: true)
+        rig.controller.didWake()
+        #expect(try rig.smc.read("CHIE") == [0x08], "resumes on wake")
+    }
+
+    @Test func clearsWithoutAdapterSwitch() throws {
+        let rig = try Rig(.unsupported, config: ChargeConfig(dischargeTo: 40))
+        rig.controller.start()
+        rig.set(70)
+        #expect(rig.controller.config.dischargeTo == nil)
+    }
+}
