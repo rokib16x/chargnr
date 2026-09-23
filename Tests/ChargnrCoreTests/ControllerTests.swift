@@ -454,3 +454,17 @@ extension Logger {
         #expect(try smc.read("CHIE") == [0x00], "power back at the floor even though still hot")
     }
 }
+
+@Suite struct LEDRefusedTests {
+    @Test func errorClearsWhenLEDModeIsDropped() throws {
+        let rig = try Rig(.tahoe, config: ChargeConfig(led: .status))
+        rig.smc.gate("ACLC")
+        rig.controller.start()
+        rig.set(60)
+        #expect(rig.controller.status().lastError?.contains("LED") == true)
+        try rig.controller.setConfig(ChargeConfig(led: .system))
+        #expect(rig.controller.status().lastError == nil)
+        rig.set(61)
+        #expect(rig.controller.status().lastError == nil)
+    }
+}

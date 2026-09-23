@@ -179,6 +179,7 @@ public final class Controller: @unchecked Sendable {
         let new = new.normalized
         try configFile.save(new)
         config = new
+        if new.led == .system, lastError == ledRefused { lastError = nil }
         log.notice("config: limit \(new.limit, privacy: .public)% gap \(new.gap, privacy: .public) heat \(new.heatLimit.map { "\($0) °C" } ?? "off", privacy: .public), method \(self.method.rawValue, privacy: .public)")
         tick()
     }
@@ -244,7 +245,8 @@ public final class Controller: @unchecked Sendable {
             // Record intent first, so a crash mid-write still triggers a restore.
             if next != .normal { try? marker.save(next) }
             try actuator.apply(switches)
-            lastError = ledRefused
+            // Only worth reporting while an LED mode is still asked for.
+            lastError = config.led == .system ? nil : ledRefused
         } catch {
             lastError = "\(error)"
             log.error("apply failed: \(String(describing: error), privacy: .public)")
