@@ -31,6 +31,12 @@ The policy combines these, strongest first:
 4. **Limit and sailing** (`limit`, `sailing`): stop at the limit, resume
    `gap` points below it. The adapter method keeps a band of at least 3.
 
+**Safety floors.** At or below 10% nothing cuts the adapter, whatever the
+settings. Heat protection that can only cut the adapter (gated firmware) stops
+at 40%: a hot battery may not cool while the Mac runs from it, so it could
+otherwise drain flat. Found in hardware testing with heat at 30 °C and a
+battery idling at 35 °C.
+
 **MagSafe LED** (`led status|off|system`) is set after the switches, only when
 its value changes. `status` shows orange while the battery takes charge
 (IOKit `IsCharging`) and green otherwise. The LED is handed back to macOS

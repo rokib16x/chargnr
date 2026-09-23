@@ -98,9 +98,23 @@ public struct PolicyInput: Sendable {
 
 /// The charging decision, as a pure function so it can be tested without hardware.
 public enum ChargePolicy {
+    /// At or below this, nothing may cut the adapter: the Mac must not run
+    /// itself flat because of a setting.
+    public static let criticalFloor = 10
+    /// Heat protection that can only cut the adapter (gated firmware) stops
+    /// here. A hot battery may not cool while the Mac runs from it, so without
+    /// a floor it could drain all the way down.
+    public static let heatAdapterFloor = 40
+
     /// Force discharge wins over everything; then heat, which only ever
     /// switches things off; then the limit.
     public static func decide(_ input: PolicyInput) -> ChargeOutput {
+        var output = decideIgnoringFloor(input)
+        if input.percent <= criticalFloor { output.adapterOn = true }
+        return output
+    }
+
+    private static func decideIgnoringFloor(_ input: PolicyInput) -> ChargeOutput {
         if input.discharging && input.canCutAdapter {
             return ChargeOutput(chargingAllowed: true, adapterOn: false)
         }
@@ -109,7 +123,7 @@ public enum ChargePolicy {
         if input.hot && (input.pluggedIn || !input.previous.adapterOn) {
             // Stopping charging keeps the Mac on wall power, so prefer it.
             if input.canInhibit { output.chargingAllowed = false }
-            else if input.canCutAdapter { output.adapterOn = false }
+            else if input.canCutAdapter, input.percent > heatAdapterFloor { output.adapterOn = false }
         }
         return output
     }

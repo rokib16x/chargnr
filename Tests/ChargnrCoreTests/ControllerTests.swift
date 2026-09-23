@@ -411,3 +411,46 @@ extension Logger {
     /// Keeps test runs out of the real helper's log.
     static let quiet = Logger(.disabled)
 }
+
+@Suite struct SafetyFloorTests {
+    func input(_ percent: Int, hot: Bool = false, discharging: Bool = false,
+               canInhibit: Bool = false, previous: ChargeOutput = .normal) -> PolicyInput {
+        PolicyInput(config: ChargeConfig(limit: 90), method: .none, percent: percent, pluggedIn: true,
+                    hot: hot, discharging: discharging, canInhibit: canInhibit, canCutAdapter: true, previous: previous)
+    }
+
+    @Test func heatCutsAdapterOnlyAboveFloor() {
+        #expect(ChargePolicy.decide(input(41, hot: true)).adapterOn == false)
+        #expect(ChargePolicy.decide(input(40, hot: true)).adapterOn == true)
+    }
+
+    @Test func heatWithInhibitHasNoFloor() {
+        #expect(ChargePolicy.decide(input(20, hot: true, canInhibit: true)) == ChargeOutput(chargingAllowed: false, adapterOn: true))
+    }
+
+    @Test func nothingCutsAdapterAtCriticalLevel() {
+        let cut = ChargeOutput(chargingAllowed: true, adapterOn: false)
+        #expect(ChargePolicy.decide(input(10, hot: true, discharging: true, previous: cut)).adapterOn == true)
+        #expect(ChargePolicy.decide(input(11, discharging: true, previous: cut)).adapterOn == false)
+    }
+
+    @Test func hotBatteryDrainsOnlyToFloorOnGatedMac() throws {
+        let clock = FakeClock()
+        let smc = FakeSMC(profile: .gated)
+        let battery = FakeBattery()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let file = JSONFile<ChargeConfig>(dir.appendingPathComponent("c.json"))
+        try file.save(ChargeConfig(limit: 85, heatLimit: 30))
+        let controller = Controller(actuator: Actuator(smc: smc, caps: Capabilities.detect(smc)), configFile: file,
+                                    marker: JSONFile(dir.appendingPathComponent("m.json")), now: { clock.now },
+                                    log: .quiet, readBattery: { battery.reading })
+        battery.reading = BatteryReading(percent: 60, pluggedIn: true, temperatureC: 35)
+        controller.start()
+        #expect(try smc.read("CHIE") == [0x08])
+        for percent in stride(from: 59, through: 40, by: -1) {
+            battery.reading = BatteryReading(percent: percent, pluggedIn: false, temperatureC: 35)
+            controller.tick()
+        }
+        #expect(try smc.read("CHIE") == [0x00], "power back at the floor even though still hot")
+    }
+}
