@@ -52,12 +52,20 @@ What still works on this firmware:
    - `isMCLCurrentlyEnabled:` → `Q24@0:8^@16`
    - `getMCLLimitWithError:` → `C24@0:8^@16` (100 when off)
    - `availableChargeLimitsWithError:` → `@24@0:8^@16` → `[80, 85, 90, 95, 100]`
-   Write calls, not tested yet: `setMCLLimit:error:` (`B28@0:8C16^@20`),
-   `enableMCL:`, `disableMCL:`, `temporarilyDisableMCL:` (top up; does not clear
-   itself on full charge or unplug), `temporarilyOverrideMCLTargetSoC:error:`
-   (`B28@0:8C16^@20`, unknown whether it accepts values below 80).
-   Limits below 80% are reported impossible through this API.
-2. **Adapter cut-off** (root). Write `CHIE = 08` at the upper limit so the Mac
+   Write calls tested on this Mac, without root (2026-09-23, battery at 100%):
+   - `setMCLLimit:error:` (`B28@0:8C16^@20`) with 80 → ok, and the limit
+     switches on by itself. 100 → ok, and the limit switches off.
+   - Any whole number from 80 to 100 is accepted (83 worked), not only the
+     5% steps System Settings shows.
+   - 70 → fails with `PowerUISmartChargingErrorDomain` code 4. Nothing below
+     80 is possible through this API.
+   - `temporarilyOverrideMCLTargetSoC:error:` behaves the same way: 90 → ok
+     (and `getMCLLimit` then reports 90), 70 → code 4.
+   - Not tested yet: whether charging really stops at the limit (needs the
+     battery below it), and `temporarilyDisableMCL:` for top up (reported not
+     to clear itself on full charge or unplug).
+2. **Adapter cut-off** (root). `sudo chargnr adapter off --for SECONDS` tests it
+   and switches power back on after the timer, on Ctrl-C and on kill. Write `CHIE = 08` at the upper limit so the Mac
    runs on battery, `CHIE = 00` at the lower limit. Allows any limit, but only
    while chargnr is awake to switch it, adds shallow cycles, and must restore
    the adapter on exit, crash and before sleep.

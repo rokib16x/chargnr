@@ -113,3 +113,35 @@ import Testing
         #expect(ChargeState.read(smc, Capabilities.detect(smc)).temperatureC == nil)
     }
 }
+
+@Suite struct AdapterTests {
+    @Test func switchesChieWithItsOwnValue() throws {
+        let smc = FakeSMC(profile: .gated)
+        let caps = Capabilities.detect(smc)
+        try Adapter.set(enabled: false, smc: smc, caps: caps)
+        #expect(try smc.read("CHIE") == [0x08])
+        try Adapter.set(enabled: true, smc: smc, caps: caps)
+        #expect(try smc.read("CHIE") == [0x00])
+    }
+
+    @Test func legacyKeyUsesOne() throws {
+        let smc = FakeSMC(profile: .legacy)
+        try Adapter.set(enabled: false, smc: smc, caps: Capabilities.detect(smc))
+        #expect(try smc.read("CH0I") == [0x01])
+    }
+
+    @Test func reportsIgnoredWrite() {
+        let smc = FakeSMC(profile: .gated)
+        smc.rejectWrites(to: "CHIE")
+        #expect(throws: AdapterError.notApplied("CHIE")) {
+            try Adapter.set(enabled: false, smc: smc, caps: Capabilities.detect(smc))
+        }
+    }
+
+    @Test func unsupportedWithoutKey() {
+        let smc = FakeSMC(profile: .unsupported)
+        #expect(throws: AdapterError.unsupported) {
+            try Adapter.set(enabled: false, smc: smc, caps: Capabilities.detect(smc))
+        }
+    }
+}

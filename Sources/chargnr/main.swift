@@ -8,6 +8,10 @@ let usage = """
     commands:
       status [--json]    battery, charging state and what this Mac supports
       keys [--all|KEY…]  raw values of the SMC keys chargnr uses (--all: every key)
+      adapter on         switch wall power back on (needs sudo)
+      adapter off --for SECONDS
+                         run from battery while plugged in, then switch power
+                         back on by itself (needs sudo, 1–3600 s)
       version            print the version
       help               show this help
 
@@ -32,6 +36,7 @@ struct Options {
     var all = false
     var fake: FakeSMC.Profile?
     var keys: [SMCKey] = []
+    var seconds: Int?
 
     init(_ args: ArraySlice<String>) {
         var args = args
@@ -39,6 +44,11 @@ struct Options {
             switch arg {
             case "--json": json = true
             case "--all": all = true
+            case "--for":
+                guard let value = args.popFirst().flatMap(Int.init), (1...3600).contains(value) else {
+                    fail("--for needs a number of seconds from 1 to 3600")
+                }
+                seconds = value
             case "--fake":
                 guard let name = args.popFirst(), let profile = FakeSMC.Profile(rawValue: name) else {
                     fail("--fake needs one of: \(profiles)")
@@ -159,6 +169,61 @@ case "keys":
         guard let info = try? smc.keyInfo(key) else { continue }
         let value = (try? smc.read(key)).map(hex) ?? "(unreadable)"
         print("\(key)  \(info.type)  \(info.size)B  \(value)")
+    }
+case "adapter":
+    let action = args.popFirst()
+    let options = Options(args)
+    guard options.fake == nil else { fail("adapter only works on the real Mac") }
+    let smc = options.transport()
+    let caps = Capabilities.detect(smc)
+
+    @Sendable func switchAdapter(_ on: Bool) {
+        do {
+            try Adapter.set(enabled: on, smc: smc, caps: caps)
+        } catch .needsRoot {
+            fail("switching the adapter needs root: run it with sudo", code: 77)
+        } catch {
+            fail("could not switch the adapter \(on ? "on" : "off"): \(error)", code: 70)
+        }
+    }
+
+    switch action {
+    case "on":
+        switchAdapter(true)
+        print("Adapter on.")
+    case "off":
+        guard let seconds = options.seconds else {
+            fail("adapter off needs --for SECONDS, so power always comes back")
+        }
+        // Restore power on Ctrl-C or kill, not only when the timer ends.
+        let signals = [SIGINT, SIGTERM, SIGHUP]
+        for sig in signals { signal(sig, SIG_IGN) }
+        let sources = signals.map { sig in
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .global())
+            source.setEventHandler {
+                switchAdapter(true)
+                print("\nInterrupted. Adapter on.")
+                exit(130)
+            }
+            source.resume()
+            return source
+        }
+
+        switchAdapter(false)
+        print("Adapter off for \(seconds) s (\(caps.adapterKey?.description ?? "?")). Ctrl-C switches it back on.")
+        for elapsed in 1...seconds {
+            sleep(1)
+            let b = BatteryInfo.current()
+            let state = ChargeState.read(smc, caps)
+            print(String(format: "%3d s  battery %@%%  %+.1f W  adapter %@", elapsed,
+                         b.map { String($0.percent) } ?? "?",
+                         Double(b?.batteryPowerMW ?? 0) / 1000,
+                         state.adapterDisabled == true ? "off" : "on"))
+        }
+        switchAdapter(true)
+        withExtendedLifetime(sources) { print("Adapter on.") }
+    default:
+        fail("usage: chargnr adapter on | off --for SECONDS")
     }
 case "version", "--version", "-v":
     print("chargnr \(Chargnr.version)")
