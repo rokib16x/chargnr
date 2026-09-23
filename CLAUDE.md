@@ -34,7 +34,8 @@ Sources/ChargnrCore      SMC/, Hardware/ (detection, readings, macOS limit), Con
                          actuator, controller), Helper/ (XPC protocol, caller policy, installer)
 Sources/chargnr          CLI
 Sources/chargnr-helper   root daemon: charge loop, sleep hooks, XPC server
-App/                     menu bar app (Xcode target from project.yml)
+App/                     menu bar app: AppModel (state), PopoverView, SettingsView,
+                         Notifier, HelperInstaller (SMAppService or admin-password CLI install)
 Tests/ChargnrCoreTests   swift-testing tests
 docs/hardware.md         SMC keys and firmware findings; update it when hardware facts change
 docs/helper.md           helper design: methods, safety rules, caller policy, install
@@ -45,14 +46,20 @@ docs/helper.md           helper design: methods, safety rules, caller policy, in
 ```sh
 swift build                 # core, CLI, helper
 swift test                  # unit tests (fake hardware only)
-make app                    # xcodegen + xcodebuild the menu bar app
+make app                    # xcodegen + xcodebuild the menu bar app (scheme chargnr-app)
 open build/Build/Products/Debug/chargnr.app
+# Render the popover and settings with live data, without touching the screen:
+build/Build/Products/Debug/chargnr.app/Contents/MacOS/chargnr --snapshot /tmp/p.png [--dark]
 ```
 
 - Requires Xcode 16+ and XcodeGen (`brew install xcodegen`). `chargnr.xcodeproj`
   is generated, not committed.
-- Signed ad hoc for now (`CODE_SIGN_IDENTITY = -`). The root helper (phase 2)
-  needs a real Developer ID to install.
+- The Xcode scheme is `chargnr-app`: the Swift package also has a `chargnr`
+  scheme (the CLI), and `-scheme chargnr` silently builds that instead.
+- The app bundle carries `Contents/MacOS/chargnr-helper` and `chargnr-cli`.
+- Signed ad hoc for now (`CODE_SIGN_IDENTITY = -`). Ad-hoc builds install the
+  helper through the embedded CLI with an administrator password prompt;
+  team-signed builds use SMAppService.
 
 ## Roadmap
 
@@ -60,6 +67,6 @@ open build/Build/Products/Debug/chargnr.app
 1. Real AppleSMC transport, key-set detection (legacy / Tahoe / macOS 27 firmware), `chargnr status` ← done (see docs/hardware.md: firmware 20457.1 has no charge keys)
 2. Root helper: SMAppService, XPC with signing check, verified writes, crash recovery, sleep hooks ← done (needs hardware test)
 3. Charging logic: limit, sailing, heat, top up, discharge, adapter, MagSafe LED ← done (needs hardware test)
-4. Menu bar UI, notifications, login item
+4. Menu bar UI, notifications, login item ← done
 5. CLI parity, calibration + schedule, history, Shortcuts
 6. Signing, notarization, DMG, Homebrew cask

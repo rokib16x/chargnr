@@ -35,6 +35,18 @@ public struct Capabilities: Codable, Equatable, Sendable {
 
     public var canDisableAdapter: Bool { adapterKey != nil }
 
+    public init(charging: ChargingMethod, canInhibit: Bool, adapterKey: SMCKey?, magSafeLED: Bool, temperature: Bool) {
+        self.charging = charging
+        self.canInhibit = canInhibit
+        self.adapterKey = adapterKey
+        self.magSafeLED = magSafeLED
+        self.temperature = temperature
+    }
+
+    /// For a Mac whose SMC could not be opened.
+    public static let none = Capabilities(charging: .unsupported, canInhibit: false, adapterKey: nil,
+                                          magSafeLED: false, temperature: false)
+
     public static func detect(_ smc: some SMCTransport) -> Capabilities {
         let firmware = [SMCKeys.firmwareLimitActive, SMCKeys.firmwareLimitUpper, SMCKeys.firmwareLimitLower]
             .allSatisfy(smc.exists)

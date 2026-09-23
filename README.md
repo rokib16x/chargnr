@@ -3,7 +3,8 @@
 Keep your MacBook battery healthy. chargnr is a free, open-source menu bar app
 that stops charging at the level you choose.
 
-> **Status: early development.** Nothing controls charging yet.
+> **Status: early development.** Charging control, the helper and the menu bar
+> app work; releases are not signed yet.
 
 ## Planned features
 

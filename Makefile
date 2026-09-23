@@ -8,7 +8,7 @@ test:
 
 app:
 	xcodegen generate
-	xcodebuild -project chargnr.xcodeproj -scheme chargnr -configuration Debug \
+	xcodebuild -project chargnr.xcodeproj -scheme chargnr-app -configuration Debug \
 		-derivedDataPath build build -quiet
 
 run: app

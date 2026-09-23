@@ -341,8 +341,9 @@ case "led":
     case .system: print("MagSafe LED back to macOS.")
     }
 case "install":
-    let helper = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
-        .deletingLastPathComponent().appendingPathComponent("chargnr-helper").path
+    // Next to the CLI: .build/release, Homebrew, or chargnr.app/Contents/MacOS.
+    let here = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath().deletingLastPathComponent()
+    let helper = here.appendingPathComponent("chargnr-helper").path
     do { try Installer.install(helper: helper) } catch { fail("\(error)", code: 70) }
     print("Helper installed and running. Set a limit with: chargnr limit 80")
 case "uninstall":

@@ -33,7 +33,8 @@ public enum CallerPolicy: Equatable, Sendable {
         return "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\" and (\(identifiers))"
     }
 
-    static func ownTeamID() -> String? {
+    /// The Team ID this process is signed with, or nil for ad-hoc / unsigned builds.
+    public static func ownTeamID() -> String? {
         var code: SecCode?
         guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return nil }
         var staticCode: SecStaticCode?

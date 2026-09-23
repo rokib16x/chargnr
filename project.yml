@@ -36,7 +36,11 @@ targets:
       - target: chargnr-helper
         copy:
           destination: executables
+      - target: chargnr-cli
+        copy:
+          destination: executables
       - sdk: ServiceManagement.framework
+      - sdk: UserNotifications.framework
     settings:
       base:
         PRODUCT_NAME: chargnr
@@ -59,3 +63,28 @@ targets:
         # Gives the tool a real signing identifier instead of a random one.
         GENERATE_INFOPLIST_FILE: YES
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+  chargnr-cli:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/chargnr
+    dependencies:
+      - package: chargnr
+        product: ChargnrCore
+    settings:
+      base:
+        # Named after the target so XcodeGen's copy phase finds it; a
+        # `chargnr` symlink can point at it.
+        PRODUCT_NAME: chargnr-cli
+        PRODUCT_BUNDLE_IDENTIFIER: com.rokib16x.chargnr.cli
+        SKIP_INSTALL: YES
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+schemes:
+  # The Swift package also has a `chargnr` scheme (the CLI), so the app gets its own name.
+  chargnr-app:
+    build:
+      targets:
+        chargnr: all
+    run:
+      config: Debug
