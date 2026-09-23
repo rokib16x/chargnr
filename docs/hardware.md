@@ -12,7 +12,7 @@ chargnr never branches on versions: it probes for keys at startup.
 | Older (M1–M3 era) | `CH0B` + `CH0C` = `02` (allow `00`) | `CH0I` = `01` | `ACLC` |
 | Tahoe era | `CHTE` = `01 00 00 00` (allow `00 00 00 00`) | `CHIE` = `08` | `ACLC` |
 | Early macOS 27 betas | `bfF0`/`bfD0`/`bfE0` firmware limit (see below) | `CHIE` | not controlled |
-| **20457.1.x (macOS 27)** | **none found** | `CHIE` | `ACLC` |
+| **20457.1.x (macOS 27)** | **gated** (see below) | `CHIE` | `ACLC` |
 
 ### Firmware limit (bfF0 / bfD0 / bfE0)
 
@@ -23,15 +23,47 @@ chargnr never branches on versions: it probes for keys at startup.
 - The firmware enforces the range itself, including during sleep. Above the
   limit it may run the Mac from the battery.
 
-### Firmware 20457.1.29 (confirmed on Mac16,8, M4 Pro, macOS 27.0, 2026-09-23)
+### Firmware 20457.1.x: charge keys gated (confirmed 2026-09-23)
 
-`chargnr keys --all` lists 3335 keys. `CH0B`, `CH0C`, `CHTE`, `bfF0`, `bfD0`
-and `bfE0` are all gone. `CHIE` (adapter) and `ACLC` (LED) remain. The `bf*`
-range now holds `bfA0`–`bfL0` minus D/E/F, with no obvious limit semantics yet.
-Until a replacement is found, this firmware is reported as unsupported and users
-are pointed at the built-in limit in System Settings › Battery.
+Tested on Mac16,8 (M4 Pro), firmware 20457.1.29, macOS 27.0. The same change
+shipped from macOS 27 beta 4 (firmware 20457.0.125.0.2) and in the macOS 15.8 /
+26.7 security updates.
 
-Open question: whether the built-in macOS limit can be driven from software.
+| Key | Result |
+|---|---|
+| `bfF0`, `bfD0`, `bfE0` | still listed by `#KEY`, but key info, read and write all fail with `kIOReturnNotPrivileged` (`0xe00002c1`), even as root |
+| `CH0J` | same: `kIOReturnNotPrivileged` |
+| `CH0B`, `CH0C`, `CHTE`, `CH0I` | not accessible (reported elsewhere as zero-size placeholders) |
+| `CHIE` | readable, and reported writable as root: the adapter switch still works |
+| `ACLC`, `BUIC`, `AC-W`, `TB0T` | readable |
+
+AppleSMC now filters these keys in its user client. The gate is reported as the
+private entitlement `com.apple.private.iokit.soc-limit`, which third-party apps
+cannot get. `IOPSCopyBatteryLevelLimits()` is gated the same way.
+chargnr reports this state as `ChargingMethod.gated`.
+
+What still works on this firmware:
+
+1. **macOS's own charge limit via PowerUI** (no root). Private framework
+   `/System/Library/PrivateFrameworks/PowerUI.framework`, class
+   `PowerUISmartChargeClient`, created with `initWithClientName:`.
+   Read-only calls confirmed on this Mac:
+   - `isMCLSupported` → `B16@0:8` → YES
+   - `isMCLCurrentlyEnabled:` → `Q24@0:8^@16`
+   - `getMCLLimitWithError:` → `C24@0:8^@16` (100 when off)
+   - `availableChargeLimitsWithError:` → `@24@0:8^@16` → `[80, 85, 90, 95, 100]`
+   Write calls, not tested yet: `setMCLLimit:error:` (`B28@0:8C16^@20`),
+   `enableMCL:`, `disableMCL:`, `temporarilyDisableMCL:` (top up; does not clear
+   itself on full charge or unplug), `temporarilyOverrideMCLTargetSoC:error:`
+   (`B28@0:8C16^@20`, unknown whether it accepts values below 80).
+   Limits below 80% are reported impossible through this API.
+2. **Adapter cut-off** (root). Write `CHIE = 08` at the upper limit so the Mac
+   runs on battery, `CHIE = 00` at the lower limit. Allows any limit, but only
+   while chargnr is awake to switch it, adds shallow cycles, and must restore
+   the adapter on exit, crash and before sleep.
+
+MCL = managed charge limit, OBC = optimized battery charging, DEoC = the
+"desktop end of charge" mode.
 
 ## Battery data (IORegistry, AppleSmartBattery)
 

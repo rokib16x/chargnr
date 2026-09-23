@@ -7,7 +7,7 @@ let usage = """
 
     commands:
       status [--json]    battery, charging state and what this Mac supports
-      keys [--all]       raw values of the SMC keys chargnr uses (--all: every key)
+      keys [--all|KEY…]  raw values of the SMC keys chargnr uses (--all: every key)
       version            print the version
       help               show this help
 
@@ -31,6 +31,7 @@ struct Options {
     var json = false
     var all = false
     var fake: FakeSMC.Profile?
+    var keys: [SMCKey] = []
 
     init(_ args: ArraySlice<String>) {
         var args = args
@@ -43,7 +44,9 @@ struct Options {
                     fail("--fake needs one of: \(profiles)")
                 }
                 fake = profile
-            default: fail("unknown option '\(arg)'")
+            default:
+                guard !arg.hasPrefix("-"), let key = SMCKey(string: arg) else { fail("unknown option '\(arg)'") }
+                keys.append(key)
             }
         }
     }
@@ -85,16 +88,28 @@ func printStatus(_ r: StatusReport) {
     if let limit = r.charge.firmwareLimit {
         row("Firmware limit", limit.active ? "on, \(limit.lower)–\(limit.upper)%" : "off")
     }
+    row("macOS limit", r.nativeLimit.map { $0.enabled ? "on, \($0.limit)%" : "off (choices: \($0.available.map(String.init).joined(separator: ", ")))" })
     row("Charging", onOff(r.charge.chargingInhibited, "inhibited", "allowed"))
     row("Adapter power", onOff(r.charge.adapterDisabled, "off (running on battery)", "on"))
     row("MagSafe LED", r.charge.magSafeLED.map { ["system", "off", "?", "green", "orange"][safe: Int($0)] ?? "0x\(String($0, radix: 16))" })
 
-    if r.capabilities.charging == .unsupported {
+    switch r.capabilities.charging {
+    case .gated:
+        print("""
+
+            Apple locked the charge-control keys on this firmware. chargnr will limit
+            charging through macOS's own limit (80–100%) or by switching the adapter off.
+            """)
+    case .unsupported:
         print("""
 
             This firmware exposes no charge-control keys, so chargnr cannot stop
-            charging directly yet. Use the built-in limit in System Settings › Battery.
+            charging directly. Use the built-in limit in System Settings › Battery.
             """)
+    default:
+        break
+    }
+    if r.capabilities.charging == .gated || r.capabilities.charging == .unsupported {
         if r.capabilities.canDisableAdapter { print("The adapter switch still works (force discharge).") }
     }
 }
@@ -109,7 +124,9 @@ switch args.popFirst() {
 case "status":
     let options = Options(args)
     let smc = options.transport()
-    let report = StatusReport.collect(smc: smc, battery: options.fake == nil ? BatteryInfo.current() : nil)
+    let real = options.fake == nil
+    let report = StatusReport.collect(smc: smc, battery: real ? BatteryInfo.current() : nil,
+                                      nativeLimit: real ? NativeChargeLimit.read() : nil)
     if options.json {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -120,7 +137,20 @@ case "status":
 case "keys":
     let options = Options(args)
     let smc = options.transport()
-    var keys = chargingKeys
+    var keys = options.keys.isEmpty ? chargingKeys : options.keys
+    if !options.keys.isEmpty {
+        // Explicit keys: show errors instead of skipping, for firmware research.
+        for key in keys {
+            do {
+                guard let info = try smc.keyInfo(key) else { print("\(key)  missing"); continue }
+                let value = info.size == 0 ? "(zero-size placeholder)" : (try? smc.read(key)).map(hex) ?? "(unreadable)"
+                print("\(key)  \(info.type)  \(info.size)B  \(value)")
+            } catch {
+                print("\(key)  error: \(error)")
+            }
+        }
+        exit(0)
+    }
     if options.all {
         guard let real = smc as? AppleSMC else { fail("--all needs the real SMC") }
         do { keys = try real.allKeys() } catch { fail("cannot list keys (\(error))", code: 69) }

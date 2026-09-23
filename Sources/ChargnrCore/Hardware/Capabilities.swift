@@ -6,8 +6,10 @@ public enum ChargingMethod: String, Codable, Sendable {
     case tahoe
     /// Older inhibit keys (CH0B + CH0C).
     case legacy
-    /// No charge-control keys. Firmware 20457.1+ removed them; only the adapter
-    /// switch (CHIE) is left.
+    /// The firmware limit keys exist but AppleSMC refuses them to anything
+    /// without Apple's private entitlement (firmware 20457.1+). Charging can
+    /// still be limited through macOS's own limit or by cutting the adapter.
+    case gated
     case unsupported
 
     public var summary: String {
@@ -15,6 +17,7 @@ public enum ChargingMethod: String, Codable, Sendable {
         case .firmwareLimit: "firmware charge limit (macOS 27 era)"
         case .tahoe: "charge inhibit, Tahoe-era firmware"
         case .legacy: "charge inhibit, older firmware"
+        case .gated: "charge keys locked by Apple (firmware 20457.1+)"
         case .unsupported: "not supported"
         }
     }
@@ -40,8 +43,9 @@ public struct Capabilities: Codable, Equatable, Sendable {
 
         // The firmware limit wins: it keeps working while the Mac sleeps and
         // needs no babysitting from a daemon.
+        let gated = smc.probe(SMCKeys.firmwareLimitActive) == .gated
         let method: ChargingMethod =
-            firmware ? .firmwareLimit : tahoe ? .tahoe : legacy ? .legacy : .unsupported
+            firmware ? .firmwareLimit : tahoe ? .tahoe : legacy ? .legacy : gated ? .gated : .unsupported
 
         return Capabilities(
             charging: method,

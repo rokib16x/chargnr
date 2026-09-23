@@ -12,8 +12,9 @@ public final class FakeSMC: SMCTransport {
         case tahoe
         /// Early macOS 27 firmware (before 20457.0.125): bfF0/bfD0/bfE0 limit.
         case firmwareLimit
-        /// Firmware 20457.1+: no charge-control keys left, only CHIE and ACLC.
-        case adapterOnly
+        /// Firmware 20457.1+: the limit keys and CH0J are gated, the old inhibit
+        /// keys are gone, and only CHIE and ACLC still work.
+        case gated
         /// No known charging keys.
         case unsupported
     }
@@ -37,6 +38,7 @@ public final class FakeSMC: SMCTransport {
         var keys: [SMCKey: Entry] = [:]
         var writes: [Write] = []
         var rejected: Set<SMCKey> = []
+        var gated: Set<SMCKey> = []
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -64,9 +66,10 @@ public final class FakeSMC: SMCTransport {
             set("bfF0", type: "ui8 ", [0])
             set("bfD0", type: "ui32", [100, 0, 0, 0])
             set("bfE0", type: "ui32", [100, 0, 0, 0])
-        case .adapterOnly:
+        case .gated:
             set("CHIE", type: "hex_", [0])
             set("ACLC", type: "ui8 ", [3])
+            for key: SMCKey in ["bfF0", "bfD0", "bfE0", "CH0J"] { gate(key) }
         case .unsupported:
             break
         }
@@ -85,22 +88,33 @@ public final class FakeSMC: SMCTransport {
         _ = state.withLock { $0.rejected.insert(key) }
     }
 
+    /// Makes every access to `key` fail with `notPrivileged`, like the
+    /// entitlement check on firmware 20457.1+.
+    public func gate(_ key: SMCKey) {
+        _ = state.withLock { $0.gated.insert(key) }
+    }
+
     /// Every write that reached the controller, in order.
     public var writes: [Write] {
         state.withLock { $0.writes }
     }
 
     public func keyInfo(_ key: SMCKey) throws(SMCError) -> SMCKeyInfo? {
-        state.withLock { $0.keys[key]?.info }
+        let (gated, info) = state.withLock { ($0.gated.contains(key), $0.keys[key]?.info) }
+        if gated { throw .notPrivileged }
+        return info
     }
 
     public func read(_ key: SMCKey) throws(SMCError) -> [UInt8] {
-        guard let bytes = state.withLock({ $0.keys[key]?.bytes }) else { throw .keyNotFound(key) }
+        let (gated, bytes) = state.withLock { ($0.gated.contains(key), $0.keys[key]?.bytes) }
+        if gated { throw .notPrivileged }
+        guard let bytes else { throw .keyNotFound(key) }
         return bytes
     }
 
     public func write(_ key: SMCKey, _ bytes: [UInt8]) throws(SMCError) {
         let result: SMCError? = state.withLock {
+            if $0.gated.contains(key) { return .notPrivileged }
             guard let entry = $0.keys[key] else { return .keyNotFound(key) }
             guard entry.info.size == bytes.count else {
                 return .sizeMismatch(key, expected: entry.info.size, got: bytes.count)

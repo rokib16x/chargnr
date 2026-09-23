@@ -22,9 +22,9 @@ import Testing
         #expect(caps.canInhibit, "CHTE is still there for manual control")
     }
 
-    @Test func adapterOnlyFirmwareIsUnsupported() {
-        let caps = Capabilities.detect(FakeSMC(profile: .adapterOnly))
-        #expect(caps.charging == .unsupported)
+    @Test func gatedFirmware() {
+        let caps = Capabilities.detect(FakeSMC(profile: .gated))
+        #expect(caps.charging == .gated)
         #expect(!caps.canInhibit)
         #expect(caps.canDisableAdapter)
     }
@@ -34,6 +34,23 @@ import Testing
         smc.set("bfF0", type: "ui8 ", [0])
         smc.set("bfD0", type: "ui32", [80, 0, 0, 0])
         #expect(Capabilities.detect(smc).charging == .tahoe, "bfE0 is missing")
+    }
+
+    @Test func unsupportedWhenNothingIsThere() {
+        #expect(Capabilities.detect(FakeSMC(profile: .unsupported)).charging == .unsupported)
+    }
+
+    @Test func zeroSizePlaceholderDoesNotCount() {
+        let smc = FakeSMC(profile: .unsupported)
+        smc.set("CHTE", type: "ui32", [])
+        #expect(Capabilities.detect(smc).charging == .unsupported)
+    }
+
+    @Test func gatedKeysProbeAsGated() {
+        let smc = FakeSMC(profile: .gated)
+        #expect(smc.probe("bfF0") == .gated)
+        #expect(smc.probe("CH0B") == .missing)
+        #expect(throws: SMCError.notPrivileged) { try smc.write("bfF0", [2]) }
     }
 
     @Test func adapterKeysProbeInOrder() {

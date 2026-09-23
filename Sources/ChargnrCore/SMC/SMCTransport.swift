@@ -28,9 +28,32 @@ public protocol SMCTransport: Sendable {
     func write(_ key: SMCKey, _ bytes: [UInt8]) throws(SMCError)
 }
 
+/// What probing a key found.
+public enum KeyProbe: Equatable, Sendable {
+    case present(SMCKeyInfo)
+    case missing
+    /// Listed, but the driver refuses access even to root. Firmware 20457.1+
+    /// does this for the charge-limit keys (entitlement check in AppleSMC).
+    case gated
+}
+
 public extension SMCTransport {
+    /// True only for keys that exist, carry data and can be accessed.
+    /// Zero-size placeholders and gated keys count as absent.
     func exists(_ key: SMCKey) -> Bool {
-        ((try? keyInfo(key)) ?? nil) != nil
+        if case .present(let info) = probe(key) { return info.size > 0 }
+        return false
+    }
+
+    func probe(_ key: SMCKey) -> KeyProbe {
+        do {
+            guard let info = try keyInfo(key) else { return .missing }
+            return .present(info)
+        } catch .notPrivileged {
+            return .gated
+        } catch {
+            return .missing
+        }
     }
 
     /// Writes `bytes` only after checking the key exists and the size matches,
