@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1
+
+- **The menu opens in full.** It kept the size it had when first shown, so
+  content that loaded a moment later (the 24-hour chart) pushed the top of the
+  menu out of view. It now resizes with its content, and the chart keeps its
+  space from the start so nothing jumps.
+- **A solid background** for the menu: on macOS 27 the see-through glass let
+  whatever was behind it wash out the text.
+- The menu animates open.
+
 ## 0.2.0
 
 First release.

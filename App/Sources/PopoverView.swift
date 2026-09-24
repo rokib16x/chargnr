@@ -25,6 +25,10 @@ struct PopoverView: View {
         }
         .padding(16)
         .frame(width: 320)
+        .fixedSize(horizontal: false, vertical: true)
+        // A solid background: macOS 27's glass popover lets whatever is behind
+        // it show through and washes out the text.
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     // MARK: - Header
@@ -162,8 +166,15 @@ struct PopoverView: View {
 
     private var details: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if model.history.count > 1 {
-                HistoryChart(samples: model.history, limit: model.config.isLimited ? model.config.limit : nil)
+            // Always the same height, so the popover does not jump when history loads.
+            if model.helperRunning {
+                if model.history.count > 1 {
+                    HistoryChart(samples: model.history, limit: model.config.isLimited ? model.config.limit : nil)
+                } else {
+                    Text("History appears here as the helper records it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: HistoryChart.height)
+                }
             }
             if let battery = model.battery {
                 PowerFlow(battery: battery, adapterOn: model.helper?.output.adapterOn ?? true)
@@ -331,6 +342,7 @@ struct HelperBanner: View {
 /// Battery level over the last 24 hours, with the limit as a dashed line and
 /// the stretches chargnr held charging back shaded.
 struct HistoryChart: View {
+    static let height: CGFloat = 70
     let samples: [HistorySample]
     let limit: Int?
 
@@ -363,7 +375,7 @@ struct HistoryChart: View {
                 AxisValueLabel(format: .dateTime.hour(), anchor: .top).font(.caption2)
             }
         }
-        .frame(height: 70)
+        .frame(height: Self.height)
         .accessibilityLabel("Battery level over the last 24 hours")
     }
 }

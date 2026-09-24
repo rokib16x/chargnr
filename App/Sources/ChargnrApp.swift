@@ -39,9 +39,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
 
         popover.behavior = .transient
-        popover.animates = false
-        popover.contentViewController = NSHostingController(rootView: PopoverView(
+        popover.animates = true
+        let host = NSHostingController(rootView: PopoverView(
             model: model, openSettings: { [weak self] in self?.openSettings() }, quit: { NSApp.terminate(nil) }))
+        // Follow the content's size. Without this the popover keeps the size it
+        // had when first shown, and content that grows later (the history chart,
+        // an error row) spills out of it and gets cut off at the top.
+        host.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = host
         NotificationCenter.default.addObserver(forName: NSPopover.didCloseNotification, object: popover, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.stopLiveUpdates() }
         }
@@ -58,8 +63,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await self?.model.refresh() }
         }
         idleTimer?.tolerance = 15
-        Task { await model.refresh() }
+        Task {
+            await model.refresh()
+            // Development: `--open-popover` shows the popover right after launch.
+            if CommandLine.arguments.contains("--open-popover") { await debugOpenPopover() }
+        }
     }
+
+    /// Development: `--open-popover` opens the popover after launch and reports
+    /// whether it fits its content once the history chart has loaded. When
+    /// macOS has not placed the status item (macOS 27 shows menu bar items only
+    /// for allowed apps, e.g. installed in /Applications), it anchors to a
+    /// small window instead; the popover sizes itself the same way.
+    private func debugOpenPopover() async {
+        NSApp.activate()
+        popover.behavior = .applicationDefined
+        if let button = statusItem?.button, (button.window?.frame.height ?? 0) > 0 {
+            togglePopover()
+        } else {
+            let anchor = NSWindow(contentRect: NSRect(x: 400, y: 700, width: 40, height: 20),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+            anchor.orderFrontRegardless()
+            debugAnchor = anchor
+            popover.show(relativeTo: anchor.contentView!.bounds, of: anchor.contentView!, preferredEdge: .minY)
+            startLiveUpdates()
+        }
+        let before = popover.contentSize
+        try? await Task.sleep(for: .seconds(5))
+        let content = popover.contentViewController?.view.fittingSize ?? .zero
+        let line = "popover shown \(popover.isShown) size at open \(before) size now \(popover.contentSize) content \(content) history \(model.history.count)\n"
+        FileHandle.standardError.write(Data(line.utf8))
+    }
+
+    private var debugAnchor: NSWindow?
 
     // MARK: - Status item
 
