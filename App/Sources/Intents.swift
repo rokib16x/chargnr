@@ -42,7 +42,8 @@ struct SetChargeLimitIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let percent = percent
         let config = try await apply(requireHelper: false) { $0.limit = percent }
-        return .result(dialog: config.isLimited ? "Charge limit set to \(config.limit)%." : "Charging normally.")
+        let text = config.isLimited ? "Charge limit set to \(config.limit)%." : "Charging normally."
+        return .result(dialog: "\(text)")
     }
 }
 
@@ -108,7 +109,8 @@ struct StopOverridesIntent: AppIntent {
             $0.dischargeTo = nil
             $0.calibration = nil
         }
-        return .result(dialog: config.isLimited ? "Back to the \(config.limit)% limit." : "Charging normally.")
+        let text = config.isLimited ? "Back to the \(config.limit)% limit." : "Charging normally."
+        return .result(dialog: "\(text)")
     }
 }
 

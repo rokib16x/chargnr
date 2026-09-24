@@ -51,10 +51,16 @@ enum HelperInstaller {
         // Put charging back to normal before the helper goes away.
         try? await HelperClient().restoreNormal()
         if isEnabled {
-            do { try await service.unregister() } catch { throw .failed(error.localizedDescription) }
+            do { try await unregisterDaemon() } catch { throw .failed(error.localizedDescription) }
         } else if Installer.isInstalled {
             try await runAsAdmin("uninstall")
         }
+    }
+
+    /// SMAppService is not Sendable, so the async call gets its own instance
+    /// off the main actor instead of sending the shared one across.
+    private nonisolated static func unregisterDaemon() async throws {
+        try await SMAppService.daemon(plistName: HelperService.plistName).unregister()
     }
 
     /// Runs the embedded CLI as root through macOS's standard password dialog.
