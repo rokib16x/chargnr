@@ -63,6 +63,19 @@ build/Build/Products/Debug/chargnr.app/Contents/MacOS/chargnr --snapshot /tmp/p.
   helper through the embedded CLI with an administrator password prompt;
   team-signed builds use SMAppService.
 
+## Releasing
+
+- Bump the version in **both** `project.yml` (`MARKETING_VERSION`) and
+  `Sources/ChargnrCore/Chargnr.swift`; the workflow refuses a mismatch.
+- Add a `CHANGELOG.md` entry.
+- Secrets: `scripts/set-release-secrets.sh /path/to/Signing/private` (run by the
+  user; it sends the Developer ID and notary credentials to GitHub).
+- Dry run (builds, signs, notarizes, publishes nothing):
+  `gh workflow run release.yml -R rokib16x/chargnr -f tag=vX.Y.Z`
+- Real release: push a `vX.Y.Z` tag, only when the user asks. The workflow
+  publishes the DMG and bumps `Casks/chargnr.rb` (this repo is its own tap).
+- `scripts/sign-app.sh -` signs ad hoc to check the signing steps locally.
+
 ## Roadmap
 
 0. Repo, build, CI, fake hardware ← done
@@ -71,4 +84,4 @@ build/Build/Products/Debug/chargnr.app/Contents/MacOS/chargnr --snapshot /tmp/p.
 3. Charging logic: limit, sailing, heat, top up, discharge, adapter, MagSafe LED ← done (needs hardware test)
 4. Menu bar UI, notifications, login item ← done
 5. CLI parity, calibration + schedule, history, Shortcuts ← done (needs hardware test)
-6. Signing, notarization, DMG, Homebrew cask
+6. Signing, notarization, DMG, Homebrew cask ← workflow ready; needs secrets and a dry run
