@@ -31,11 +31,15 @@ Apple Silicon only, macOS 14 or later.
 ## Install
 
 Download the DMG from [Releases](https://github.com/rokib16x/chargnr/releases),
-or with Homebrew:
+or use Homebrew. This repository is its own tap:
 
 ```sh
-brew install --cask rokib16x/chargnr/chargnr
+brew tap rokib16x/chargnr https://github.com/rokib16x/chargnr
+brew trust --tap rokib16x/chargnr
+brew install --cask chargnr
 ```
+
+The cask also puts the `chargnr` command on your PATH.
 
 Open chargnr from the menu bar and install its helper when asked. The helper is
 a small background service that switches charging; it needs your approval once.
