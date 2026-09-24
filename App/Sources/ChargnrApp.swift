@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var liveTimer: Timer?
     private var idleTimer: Timer?
     private var lastTitle: (symbol: String, text: String)?
+    private static let brandGlyph = "MenuBarGlyph"
 
     static func main() {
         let app = NSApplication.shared
@@ -64,19 +65,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateStatusItem(_ model: AppModel) {
         let percent = model.battery?.percent ?? 0
+        // The chargnr glyph normally; a system symbol while chargnr is actively
+        // doing something, so the state shows at a glance.
         let symbol: String = switch model.phase {
-        case .charging, .toppingUp: "battery.100percent.bolt"
+        case .charging, .toppingUp, .calibrating(.charge), .calibrating(.hold): "battery.100percent.bolt"
         case .heatPause: "thermometer.high"
         case .discharging, .calibrating(.discharge): "arrow.down.circle"
-        case .calibrating: "battery.100percent.bolt"
-        default: "battery.\(percent >= 88 ? 100 : percent >= 63 ? 75 : percent >= 38 ? 50 : percent >= 13 ? 25 : 0)percent"
+        default: Self.brandGlyph
         }
         let text = Preferences.bool(.showPercent) && model.battery != nil ? " \(percent)%" : ""
         // The menu bar redraws only when something visible changed.
         guard lastTitle?.symbol != symbol || lastTitle?.text != text, let button = statusItem?.button else { return }
         lastTitle = (symbol, text)
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "chargnr")
-        button.image?.isTemplate = true
+        let image = symbol == Self.brandGlyph
+            ? NSImage(named: symbol)
+            : NSImage(systemSymbolName: symbol, accessibilityDescription: "chargnr")
+        image?.isTemplate = true
+        image?.accessibilityDescription = "chargnr"
+        button.image = image
         button.title = text
     }
 

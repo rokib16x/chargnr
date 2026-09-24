@@ -354,13 +354,13 @@ struct HistoryChart: View {
         .chartYAxis {
             AxisMarks(values: [0, 50, 100]) { value in
                 AxisGridLine()
-                AxisValueLabel { Text("\(value.as(Int.self) ?? 0)%").font(.caption2) }
+                AxisValueLabel(anchor: .leading) { Text("\(value.as(Int.self) ?? 0)%").font(.caption2) }
             }
         }
         .chartXAxis {
             AxisMarks(values: .stride(by: .hour, count: 6)) { _ in
                 AxisGridLine()
-                AxisValueLabel(format: .dateTime.hour()).font(.caption2)
+                AxisValueLabel(format: .dateTime.hour(), anchor: .top).font(.caption2)
             }
         }
         .frame(height: 70)
