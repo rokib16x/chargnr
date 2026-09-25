@@ -580,3 +580,45 @@ extension Logger {
         #expect(CalibrationSchedule(everyDays: 1, hour: 30) == CalibrationSchedule(everyDays: 7, hour: 23))
     }
 }
+
+@Suite struct LidGuardTests {
+    @Test func lidClosedNeverCutsTheCharger() {
+        for discharging in [false, true] {
+            let input = PolicyInput(config: ChargeConfig(limit: 60), method: .adapter, percent: 80, pluggedIn: true,
+                                    hot: true, discharging: discharging, lidClosed: true,
+                                    canInhibit: false, canCutAdapter: true, previous: .normal)
+            #expect(ChargePolicy.decide(input).adapterOn == true)
+        }
+    }
+
+    @Test func lidClosedStillAllowsStoppingCharging() {
+        let input = PolicyInput(config: ChargeConfig(limit: 60), method: .inhibit, percent: 80, pluggedIn: true,
+                                lidClosed: true, canInhibit: true, canCutAdapter: true, previous: .normal)
+        #expect(ChargePolicy.decide(input) == ChargeOutput(chargingAllowed: false, adapterOn: true))
+    }
+
+    @Test func closingTheLidRestoresPowerAndOpeningResumes() throws {
+        let rig = try Rig(.gated, config: ChargeConfig(limit: 60))
+        rig.battery.reading = BatteryReading(percent: 70, pluggedIn: true)
+        rig.controller.start()
+        #expect(try rig.smc.read("CHIE") == [0x08], "above the limit: charger cut")
+
+        rig.battery.reading.lidClosed = true
+        rig.controller.tick()
+        #expect(try rig.smc.read("CHIE") == [0x00], "lid closed: charger back on")
+        #expect(rig.controller.status().lidClosed == true)
+
+        rig.battery.reading.lidClosed = false
+        rig.controller.tick()
+        #expect(try rig.smc.read("CHIE") == [0x08], "lid open again: limit resumes")
+    }
+
+    @Test func dischargePausesWithLidClosed() throws {
+        let rig = try Rig(.gated, config: ChargeConfig(dischargeTo: 40))
+        rig.battery.reading = BatteryReading(percent: 70, pluggedIn: true, lidClosed: true)
+        rig.controller.start()
+        #expect(try rig.smc.read("CHIE") == [0x00])
+        #expect(!rig.controller.isDischarging, "no keep-awake assertion while paused")
+        #expect(rig.controller.config.dischargeTo == 40, "still pending, resumes when the lid opens")
+    }
+}

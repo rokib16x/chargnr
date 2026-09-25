@@ -102,6 +102,23 @@ if rootPort != 0, let notifyPort {
     log.error("could not register for sleep notifications")
 }
 
+// MARK: - Lid
+
+// Closing the lid in clamshell mode with the charger cut would make macOS sleep,
+// so re-check the moment the lid state changes instead of at the next tick.
+let clamshellStateChange: UInt32 = 0xE003_4100 // kIOPMMessageClamshellStateChange
+var lidNotifier: io_object_t = 0
+let lidPort = IONotificationPortCreate(kIOMainPortDefault)
+let rootDomain = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+if let lidPort, rootDomain != IO_OBJECT_NULL {
+    CFRunLoopAddSource(CFRunLoopGetMain(), IONotificationPortGetRunLoopSource(lidPort).takeUnretainedValue(), .defaultMode)
+    let result = IOServiceAddInterestNotification(lidPort, rootDomain, kIOGeneralInterest, { _, _, messageType, _ in
+        guard messageType == clamshellStateChange else { return }
+        queue.async { schedule(controller.tick()) }
+    }, nil, &lidNotifier)
+    if result != KERN_SUCCESS { log.error("could not watch the lid: \(result, privacy: .public)") }
+}
+
 // MARK: - Exit
 
 // launchd sends SIGTERM on uninstall, shutdown and restart: put everything back.
@@ -184,6 +201,6 @@ listener.delegate = delegate
 listener.resume()
 log.notice("listening as \(HelperService.name, privacy: .public), callers: \(String(describing: delegate.policy), privacy: .public)")
 
-withExtendedLifetime((timer, powerSource, signalSources, listener)) {
+withExtendedLifetime((timer, powerSource, signalSources, listener, lidPort)) {
     RunLoop.main.run()
 }

@@ -204,6 +204,10 @@ case "status":
             if helper.config.led != .system {
                 print("LED mode".padding(toLength: 18, withPad: " ", startingAt: 0) + helper.config.led.rawValue)
             }
+            if helper.lidClosed == true, helper.method == .adapter || helper.dischargeTo != nil {
+                print("Lid closed".padding(toLength: 18, withPad: " ", startingAt: 0)
+                      + "charger kept on (the Mac needs wall power with the lid shut)")
+            }
             if let until = helper.topUpUntil {
                 print("Top up".padding(toLength: 18, withPad: " ", startingAt: 0)
                       + "charging to 100% (ends when full, on unplug, or at \(until.formatted(date: .omitted, time: .shortened)))")

@@ -77,12 +77,14 @@ public struct PolicyInput: Sendable {
     public var hot: Bool = false
     /// Force discharge is active and the battery is still above its target.
     public var discharging: Bool = false
+    /// Clamshell mode: macOS needs wall power to stay awake with the lid shut.
+    public var lidClosed: Bool = false
     public var canInhibit: Bool
     public var canCutAdapter: Bool
     public var previous: ChargeOutput
 
     public init(config: ChargeConfig, method: ControlMethod, percent: Int, pluggedIn: Bool,
-                hot: Bool = false, discharging: Bool = false,
+                hot: Bool = false, discharging: Bool = false, lidClosed: Bool = false,
                 canInhibit: Bool, canCutAdapter: Bool, previous: ChargeOutput) {
         self.config = config
         self.method = method
@@ -90,6 +92,7 @@ public struct PolicyInput: Sendable {
         self.pluggedIn = pluggedIn
         self.hot = hot
         self.discharging = discharging
+        self.lidClosed = lidClosed
         self.canInhibit = canInhibit
         self.canCutAdapter = canCutAdapter
         self.previous = previous
@@ -111,6 +114,10 @@ public enum ChargePolicy {
     public static func decide(_ input: PolicyInput) -> ChargeOutput {
         var output = decideIgnoringFloor(input)
         if input.percent <= criticalFloor { output.adapterOn = true }
+        // With the lid closed, macOS runs an external display only on wall
+        // power; cutting it would make the Mac sleep or flicker the display
+        // in a loop. Stopping charging is still fine: the Mac stays powered.
+        if input.lidClosed { output.adapterOn = true }
         return output
     }
 

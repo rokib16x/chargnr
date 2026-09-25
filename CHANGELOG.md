@@ -9,6 +9,10 @@
 - **A solid background** for the menu: on macOS 27 the see-through glass let
   whatever was behind it wash out the text.
 - The menu animates open.
+- **Lid-closed guard.** With the lid shut and an external display, macOS needs
+  wall power to stay awake. chargnr now never switches the charger off while
+  the lid is closed (limits below 80%, heat protection, discharge and
+  calibration pause) and resumes when you open it.
 
 ## 0.2.0
 

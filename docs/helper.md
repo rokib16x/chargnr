@@ -37,6 +37,14 @@ at 40%: a hot battery may not cool while the Mac runs from it, so it could
 otherwise drain flat. Found in hardware testing with heat at 30 °C and a
 battery idling at 35 °C.
 
+**Lid closed.** In clamshell mode (lid shut, external display) macOS needs
+wall power to stay awake, so cutting the charger would make the Mac sleep or
+flicker the display in a loop. While IOPMrootDomain reports
+`AppleClamshellState`, nothing cuts the charger (limit, heat, discharge and
+calibration pause); stopping charging through the inhibit keys is still fine.
+The helper re-checks on `kIOPMMessageClamshellStateChange`, so it reacts the
+moment the lid closes.
+
 **MagSafe LED** (`led status|off|system`) is set after the switches, only when
 its value changes. `status` shows orange while the battery takes charge
 (IOKit `IsCharging`) and green otherwise. The LED is handed back to macOS

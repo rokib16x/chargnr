@@ -102,6 +102,9 @@ struct PopoverView: View {
 
     private func limitNote(_ limit: Int) -> String {
         guard limit < 100 else { return "The battery charges to 100%." }
+        if model.helper?.lidClosed == true, model.helper?.method == .adapter {
+            return "Lid closed: the charger stays on until you open it, since the Mac needs wall power with the lid shut."
+        }
         if model.usesNativeLimit {
             return limit >= NativeLimitRange.minimum
                 ? "macOS holds this limit, also while the Mac sleeps."

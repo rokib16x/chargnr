@@ -10,14 +10,17 @@ public struct BatteryReading: Equatable, Sendable {
     public var isCharging: Bool?
     /// Battery power in milliwatts (IOKit), for history.
     public var batteryMW: Int?
+    /// The lid is closed (clamshell mode with an external display).
+    public var lidClosed: Bool
 
     public init(percent: Int, pluggedIn: Bool, temperatureC: Double? = nil, isCharging: Bool? = nil,
-                batteryMW: Int? = nil) {
+                batteryMW: Int? = nil, lidClosed: Bool = false) {
         self.percent = percent
         self.pluggedIn = pluggedIn
         self.temperatureC = temperatureC
         self.isCharging = isCharging
         self.batteryMW = batteryMW
+        self.lidClosed = lidClosed
     }
 
     /// Reads the SMC, which answers even when IOKit's battery service lags.
@@ -27,7 +30,8 @@ public struct BatteryReading: Equatable, Sendable {
         guard let percent = state.percent, let plugged = state.pluggedIn else { return nil }
         let info = BatteryInfo.current()
         return BatteryReading(percent: percent, pluggedIn: plugged, temperatureC: state.temperatureC,
-                              isCharging: info?.isCharging, batteryMW: info?.batteryPowerMW)
+                              isCharging: info?.isCharging, batteryMW: info?.batteryPowerMW,
+                              lidClosed: SystemInfo.isLidClosed())
     }
 }
 
@@ -42,6 +46,8 @@ public struct HelperStatus: Codable, Equatable, Sendable {
     public var temperatureC: Double?
     /// Heat protection is pausing charging right now.
     public var heatHold: Bool?
+    /// The lid is closed, so chargnr is keeping the charger on.
+    public var lidClosed: Bool?
     public var topUpUntil: Date?
     public var dischargeTo: Int?
     public var calibration: Calibration?
@@ -121,7 +127,8 @@ public final class Controller: @unchecked Sendable {
             let effective = config.effective(at: now())
             var next = ChargePolicy.decide(PolicyInput(
                 config: effective, method: method, percent: reading.percent, pluggedIn: reading.pluggedIn,
-                hot: hotSince != nil, discharging: config.dischargeTo != nil || config.calibration?.step == .discharge, canInhibit: actuator.caps.canInhibit,
+                hot: hotSince != nil, discharging: config.dischargeTo != nil || config.calibration?.step == .discharge,
+                lidClosed: reading.lidClosed, canInhibit: actuator.caps.canInhibit,
                 canCutAdapter: actuator.caps.canDisableAdapter, previous: output))
             if ledRefused == nil {
                 let charging = reading.isCharging
@@ -285,6 +292,7 @@ public final class Controller: @unchecked Sendable {
         HelperStatus(version: Chargnr.version, config: config, method: method, output: output,
                      percent: reading?.percent, pluggedIn: reading?.pluggedIn,
                      temperatureC: reading?.temperatureC, heatHold: config.heatLimit == nil ? nil : hotSince != nil,
+                     lidClosed: reading?.lidClosed,
                      topUpUntil: config.topUpUntil, dischargeTo: config.dischargeTo,
                      calibration: config.calibration,
                      nextCalibration: config.schedule.map { $0.nextRun(after: config.lastCalibration ?? now()) },
