@@ -1,6 +1,6 @@
 cask "chargnr" do
-  version "0.2.0"
-  sha256 "5760d2d978212e19a5122b843c71eeb2b7cd5915d900565f66050e135358a518"
+  version "0.2.1"
+  sha256 "bf29850cf52134df5900610b437ae1b0b00558f2fb747e57d1833b15a50d1fa7"
 
   url "https://github.com/rokib16x/chargnr/releases/download/v#{version}/chargnr-#{version}.dmg"
   name "chargnr"
